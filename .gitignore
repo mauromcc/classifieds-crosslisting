@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+.venv/
+env/
+ENV/
+.Python
+*.sqlite3
+
+# IDEs and system
+.vscode/
+.idea/
+.DS_Store
+*.log
+
+# distribution
+build/
+dist/
+*.egg-info/
+
+# secrets
+*.pem
+*.key
+credentials.json
