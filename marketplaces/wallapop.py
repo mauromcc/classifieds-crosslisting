@@ -1,6 +1,8 @@
-import time
+import time, re
 
-from helpers.scraping import collect_listing_details, collect_listing_images, check_listing_existence, find_listing_in_profile
+from selenium.webdriver.common.by import By
+
+from helpers.scraping import collect_listing_generic, check_listing_existence, find_listing_in_profile
 from helpers.uploader import upload_listing_common
 from helpers.drivers import headless_driver, visible_driver
 from helpers.cookies import ensure_logged_in
@@ -33,12 +35,24 @@ SEL_UPLOAD_CATEGORY = 'div.walla-dropdown__inner-input[aria-label="Categoría y 
 SEL_UPLOAD_CATEGORY_OPTION = 'div.sc-walla-dropdown-item'
 SEL_UPLOAD_FILE = 'input[type="file"]'
 
+# ---------------------------
+# Register this marketplace
+# ---------------------------
+register_marketplace(
+    MARKETPLACE,
+    collector=collect_from_wallapop,
+    checker=check_on_wallapop,
+    uploader=upload_to_wallapop
+)
+
+
+
 
 # ---------------------------
 # Collector
 # ---------------------------
 def collect_from_wallapop(url: str) -> dict:
-    listing = collect_listing_details(
+    return collect_listing_generic(
         url,
         MARKETPLACE,
         COL_ITEM_HTML_TITLE,
@@ -46,17 +60,6 @@ def collect_from_wallapop(url: str) -> dict:
         COL_ITEM_HTML_DESCRIPTION,
         price_filter=lambda x: x and COL_ITEM_HTML_PRICE[2] in x
     )
-
-    if check_abort():
-        return None
-
-    images, md5, phash = collect_listing_images(url)
-    listing["images"] = images
-    listing["md5"] = md5
-    listing["phash"] = phash
-    listing["source"] = MARKETPLACE
-
-    return listing
 
 
 # ---------------------------

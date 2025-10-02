@@ -1,9 +1,13 @@
 import time, re
 
-from helpers.scraping import collect_listing_details, collect_listing_images, check_listing_existence, find_listing_in_profile
+from selenium.webdriver.common.by import By
+
+from constants import register_marketplace
+from helpers.scraping import collect_listing_generic, check_listing_existence, find_listing_in_profile
 from helpers.uploader import upload_listing_common
 from helpers.drivers import headless_driver, visible_driver
 from helpers.cookies import ensure_logged_in
+from helpers.utils import vinted_title_shorten
 from helpers.abort import check_abort
 
 
@@ -35,33 +39,30 @@ SEL_UPLOAD_CATEGORY = "category"
 SEL_UPLOAD_CATEGORY_OPTION = "[id^='catalog-suggestion-']"
 SEL_UPLOAD_FILE = 'input[type="file"]'
 
+# ---------------------------
+# Register this marketplace
+# ---------------------------
+register_marketplace(
+    MARKETPLACE,
+    collector=collect_from_vinted,
+    checker=check_on_vinted,
+    uploader=upload_to_vinted
+)
+
 
 # ---------------------------
 # Collector
 # ---------------------------
 def collect_from_vinted(url: str) -> dict:
-    listing = collect_listing_details(
+    return collect_listing_generic(
         url,
         MARKETPLACE,
         COL_ITEM_HTML_TITLE,
         COL_ITEM_HTML_PRICE,
-        COL_ITEM_HTML_DESCRIPTION
-    )
-
-    if check_abort():
-        return None
-
-    images, md5, phash = collect_listing_images(
-        url,
-        MARKETPLACE,
+        COL_ITEM_HTML_DESCRIPTION,
         first_img_selector=COL_ITEM_FIRST_IMG,
         carousel_selector=COL_ITEM_CAROUSEL_IMGS
     )
-    listing["images"] = images
-    listing["md5"] = md5
-    listing["phash"] = phash
-
-    return listing
 
 
 # ---------------------------

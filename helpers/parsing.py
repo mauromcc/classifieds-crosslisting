@@ -1,6 +1,6 @@
 from urllib.parse import urlparse
 
-from constants import SUPPORTED_MARKETPLACES, REQUIRED_FIELDS, MARKETPLACE_PATTERNS
+from constants import MARKETPLACES, REQUIRED_FIELDS
 from helpers.abort import check_abort
 from marketplaces.vinted import collect_from_vinted, check_on_vinted, upload_to_vinted
 from marketplaces.wallapop import collect_from_wallapop, check_on_wallapop, upload_to_wallapop
@@ -12,8 +12,8 @@ from marketplaces.wallapop import collect_from_wallapop, check_on_wallapop, uplo
 # ---------------------------
 def detect_marketplace(url: str) -> str | None:
     host = urlparse(url).netloc.lower()
-    for name, needles in MARKETPLACE_PATTERNS.items():
-        if any(n in host for n in needles):
+    for name, config in MARKETPLACES.items():
+        if any(n in host for n in config["patterns"]):
             return name
     return None
 
@@ -26,7 +26,7 @@ def check_required(listing: dict) -> bool:
 
 def choose_destination(source, listing):
     # Start with all possible destinations except the source
-    destinations = [m for m in SUPPORTED_MARKETPLACES if m != source]
+    destinations = [m for m in MARKETPLACES.keys() if m != source]
     skipped = []
 
     # Remove marketplaces where this item was already found
@@ -58,29 +58,22 @@ def choose_destination(source, listing):
 
     return destinations[int(choice) - 1]
 
-def collect_listing(url: str, source: str) -> dict:
-    if source == "vinted":
-        return collect_from_vinted(url)
-    elif source == "wallapop":
-        return collect_from_wallapop(url)
-    # future marketplaces:
-    # elif src == "olx": ...
-    # elif src == "milanuncios": ...
-    else:
-        print("❌ Marketplace not supported yet.")
-        return {
-            "url": url,
-            "source": None,
-            "title": None,
-            "price": None,
-            "description": None,
-            "image_urls": [],
-            "images": [],
-            "md5": None,
-            "phash": None,
-        }
+def collect_listing(url: str, source: str) -> dict:    
+    """Collect listing details using the registered collector function."""
+    config = MARKETPLACES.get(source)
+    
+    if not config:
+        print(f"❌ Unknown marketplace: {source}")
+        return _empty_listing(url, source)
+    
+    collector = config.get("collector")
+    
+    if not collector:
+        print(f"❌ Collector not implemented for {source.capitalize()}")
+        return _empty_listing(url, source)
+    
+    return collector(url)
    
-
 
 def check_existing_in_other_marketplaces(listing: dict):
     title = listing.get("title")
@@ -120,3 +113,18 @@ def upload_listing(destination: str, listing: dict):
         print(f"❌ {destination.capitalize()} marketplace not supported yet.")
         return None
 
+
+
+def _empty_listing(url: str, source: str | None) -> dict:
+    """Return an empty listing structure."""
+    return {
+        "url": url,
+        "source": source,
+        "title": None,
+        "price": None,
+        "description": None,
+        "image_urls": [],
+        "images": [],
+        "md5": None,
+        "phash": None,
+    }

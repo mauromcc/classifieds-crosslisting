@@ -12,8 +12,35 @@ from helpers.images import download_image, compute_image_hashes, hamming_distanc
 from helpers.utils import is_match, vinted_title_shorten, scroll_to_load_all_items
 
 
+# ---------------------------
+# Collecting
+# ---------------------------
 
-def collect_listing_details(url: str, marketplace, col_title, col_price, col_desc, price_filter=None) -> dict:
+def collect_listing_generic(url: str, marketplace: str, col_title, col_price, col_desc, first_img_selector=None, carousel_selector=None, price_filter=None) -> dict:
+    """
+    Generic collector that handles both listing details AND images in one call.
+    Returns complete listing dict ready to use.
+    """
+    # Get text details first
+    listing = collect_listing_details(
+        url, marketplace, col_title, col_price, col_desc, price_filter
+    )
+    
+    if check_abort():
+        return None
+    
+    # Get images
+    images, md5, phash = collect_listing_images(
+        url, marketplace, first_img_selector, carousel_selector
+    )
+    
+    listing["images"] = images
+    listing["md5"] = md5
+    listing["phash"] = phash
+    
+    return listing
+
+def collect_listing_details(url: str, marketplace: str, col_title, col_price, col_desc, price_filter=None) -> dict:
     """
     Scrape title, price, description from a URL using BeautifulSoup.
     `price_filter` can be a lambda function to filter element attributes.
@@ -75,8 +102,7 @@ def collect_listing_details(url: str, marketplace, col_title, col_price, col_des
 
     return listing
 
-
-def collect_listing_images(url, marketplace, first_img_selector=None, carousel_selector=None) -> list:
+def collect_listing_images(url: str, marketplace: str, first_img_selector=None, carousel_selector=None) -> list:
     """
     Open page in headless driver and collect images. Returns list of image URLs.
     `cdn_filter` can be a substring to filter URLs (e.g., Wallapop cdn).
@@ -145,6 +171,9 @@ def collect_listing_images(url, marketplace, first_img_selector=None, carousel_s
     return images_local, None, None
 
 
+# ---------------------------
+# Checking
+# ---------------------------
 def check_listing_existence(listing, marketplace: str, login_selector: str, home_url: str, profile_url_resolver, sel_items: str, sel_title: str, sel_img, title_extractor, image_extractor) -> str | None:
     """
     Generic skeleton for marketplace 'check' functions.
@@ -185,8 +214,7 @@ def check_listing_existence(listing, marketplace: str, login_selector: str, home
 
     return None
 
-
-def find_listing_in_profile(listing, marketplace, driver, sel_items, sel_title, sel_img, title_extractor, image_extractor, hamming_thresh=6) -> str | None:
+def find_listing_in_profile(listing, marketplace: str, driver, sel_items, sel_title, sel_img, title_extractor, image_extractor, hamming_thresh=6) -> str | None:
     """
     Scroll through profile items and match by title first, then images.
     Uses marketplace-specific extractors injected from each module.
@@ -210,7 +238,7 @@ def find_listing_in_profile(listing, marketplace, driver, sel_items, sel_title, 
     if check_abort(driver): 
         return None
 
-    # Match by title
+    # Match by titl
     print("🔍 Checking listings by title to find a match...")
     for item in items:
         try:
@@ -261,3 +289,21 @@ def find_listing_in_profile(listing, marketplace, driver, sel_items, sel_title, 
             return None
 
     return None
+
+
+
+
+
+def _empty_listing(url: str | None) -> dict:
+    """Return an empty listing structure."""
+    return {
+        "url": url,
+        "source": None,
+        "title": None,
+        "price": None,
+        "description": None,
+        "image_urls": [],
+        "images": [],
+        "md5": None,
+        "phash": None,
+    }
