@@ -11,7 +11,9 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
     Fill in listing for any marketplace given a dictionary of selectors.
     Expected selectors keys: title, description, price, category, category_option, file_input, continue_btn (optional)
     """
-    if check_abort(driver):
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
+
+    if check_abort():
         return None
 
     # Images
@@ -22,7 +24,7 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
         print(f"⚠️ Error uploading images: {e}")
         input("👉 Upload images manually, then press Enter to continue...")
 
-    if check_abort(driver):
+    if check_abort():
         return None
 
     # Title
@@ -37,7 +39,7 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
         print("⚠️ Title not filled automatically:", e)
         input("👉 Fill title manually, then press Enter to continue...")
 
-    if check_abort(driver):
+    if check_abort():
         return None
 
     # Description
@@ -52,7 +54,7 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
         print("⚠️ Description not filled automatically:", e)
         input("👉 Fill description manually, then press Enter to continue...")
 
-    if check_abort(driver):
+    if check_abort():
         return None
 
     # Price
@@ -68,7 +70,7 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
         print("⚠️ Price not filled automatically:", e)
         input("👉 Fill price manually, then press Enter to continue...")
 
-    if check_abort(driver):
+    if check_abort():
         return None
 
     # Category

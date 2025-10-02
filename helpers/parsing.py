@@ -2,34 +2,85 @@ from urllib.parse import urlparse
 
 from constants import MARKETPLACES, REQUIRED_FIELDS
 from helpers.abort import check_abort
-from marketplaces.vinted import collect_from_vinted, check_on_vinted, upload_to_vinted
-from marketplaces.wallapop import collect_from_wallapop, check_on_wallapop, upload_to_wallapop
 
 
 
 # ---------------------------
-# Required field checking & choosing marketplaces
+# Collect
 # ---------------------------
 def detect_marketplace(url: str) -> str | None:
+    """Detect marketplace from URL using patterns in MARKETPLACES config."""
     host = urlparse(url).netloc.lower()
     for name, config in MARKETPLACES.items():
-        if any(n in host for n in config["patterns"]):
+        patterns = config.get("patterns", ())
+        if any(pattern in host for pattern in patterns):
             return name
     return None
 
 def check_required(listing: dict) -> bool:
+    """Verify all required fields are present in listing."""
     missing = [k for k in REQUIRED_FIELDS if not listing.get(k)]
     if missing:
         print("❌ Missing required fields:", ", ".join(missing))
         return False
     return True
 
-def choose_destination(source, listing):
-    # Start with all possible destinations except the source
+def collect_listing(url: str, source: str) -> dict:    
+    """Collect listing details using the registered collector function."""
+    config = MARKETPLACES.get(source)
+    
+    if not config:
+        print(f"❌ Unknown marketplace: {source}")
+        return _empty_listing(url, source)
+    
+    collector = config.get("collector")
+    
+    if not collector:
+        print(f"❌ Collector not implemented for {source.capitalize()}")
+        return _empty_listing(url, source)
+    
+    return collector(url)
+   
+
+# ---------------------------
+# Checker
+# ---------------------------
+def check_existing_in_other_marketplaces(listing: dict):
+    """Check if listing exists in other marketplaces using registered checker functions."""
+    source = listing.get("source")
+    
+    for marketplace, config in MARKETPLACES.items():
+        if marketplace == source:
+            continue
+        
+        checker = config.get("checker")
+        if not checker:
+            print(f"⚠️ Checker not implemented for {marketplace.capitalize()}, skipping...")
+            continue
+        
+        found_url = checker(listing)
+        
+        if check_abort():
+            return None
+        
+        if found_url:
+            listing["exists_in"][marketplace] = found_url
+            print(f"✅ Already exists on {marketplace.capitalize()}: {found_url}")
+        else:
+            listing["exists_in"][marketplace] = None
+            print(f"❌ Not found on {marketplace.capitalize()}")
+
+
+# ---------------------------
+# Uploader
+# ---------------------------
+def choose_destination(source: str, listing: dict) -> str | None:
+    """Let user choose a destination marketplace, excluding source and existing."""
+    # Get all marketplaces except source
     destinations = [m for m in MARKETPLACES.keys() if m != source]
     skipped = []
 
-    # Remove marketplaces where this item was already found
+    # Remove marketplaces where item already exists
     if "exists_in" in listing:
         filtered = []
         for m in destinations:
@@ -58,60 +109,21 @@ def choose_destination(source, listing):
 
     return destinations[int(choice) - 1]
 
-def collect_listing(url: str, source: str) -> dict:    
-    """Collect listing details using the registered collector function."""
-    config = MARKETPLACES.get(source)
+def upload_listing(destination: str, listing: dict):
+    """Upload listing using the registered uploader function."""
+    config = MARKETPLACES.get(destination)
     
     if not config:
-        print(f"❌ Unknown marketplace: {source}")
-        return _empty_listing(url, source)
-    
-    collector = config.get("collector")
-    
-    if not collector:
-        print(f"❌ Collector not implemented for {source.capitalize()}")
-        return _empty_listing(url, source)
-    
-    return collector(url)
-   
-
-def check_existing_in_other_marketplaces(listing: dict):
-    title = listing.get("title")
-    first_img = listing["images"][0] if listing["images"] else None
-
-    for marketplace in SUPPORTED_MARKETPLACES:
-        if marketplace == listing["source"]:
-            continue
-
-        found_url = None
-        if marketplace == "wallapop":
-            found_url = check_on_wallapop(listing)
-        elif marketplace == "vinted":
-            found_url = check_on_vinted(listing)
-        # else:
-        #     found_url = fake_check_marketplace(marketplace, title, first_img)
-
-        if check_abort(): 
-            return None
-
-        if found_url:
-            listing["exists_in"][marketplace] = found_url
-            print(f"✅ Already exists on {marketplace.capitalize()}: {found_url}")
-        else:
-            listing["exists_in"][marketplace] = None
-            print(f"❌ Not found on {marketplace.capitalize()}")
-
-def upload_listing(destination: str, listing: dict):
-    if destination == "vinted":
-        return upload_to_vinted(listing)
-    elif destination == "wallapop":
-        return upload_to_wallapop(listing)
-    # future marketplaces:
-    # elif destination == "olx": ...
-    # elif destination == "milanuncios": ...
-    else:
-        print(f"❌ {destination.capitalize()} marketplace not supported yet.")
+        print(f"❌ Unknown marketplace: {destination}")
         return None
+    
+    uploader = config.get("uploader")
+    
+    if not uploader:
+        print(f"❌ Uploader not implemented for {destination.capitalize()}")
+        return None
+    
+    return uploader(listing)
 
 
 
@@ -123,7 +135,6 @@ def _empty_listing(url: str, source: str | None) -> dict:
         "title": None,
         "price": None,
         "description": None,
-        "image_urls": [],
         "images": [],
         "md5": None,
         "phash": None,

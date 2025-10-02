@@ -1,6 +1,9 @@
-from difflib import SequenceMatcher
 import time
+from difflib import SequenceMatcher
+from contextlib import contextmanager
 from selenium.webdriver.remote.webdriver import WebDriver
+
+from herlper.drivers import headless_driver, visible_driver
 
 
 
@@ -50,3 +53,21 @@ def scroll_to_load_all_items(driver: WebDriver, item_selector: str) -> list:
         
 
     return items
+
+
+@contextmanager
+def managed_driver(headless: bool = True):
+    """
+    Context manager for Selenium driver.
+    Always quits driver at the end, even on exceptions.
+    """
+    driver = None
+    try:
+        driver = headless_driver() if headless else visible_driver()
+        yield driver
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass

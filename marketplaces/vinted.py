@@ -39,15 +39,6 @@ SEL_UPLOAD_CATEGORY = "category"
 SEL_UPLOAD_CATEGORY_OPTION = "[id^='catalog-suggestion-']"
 SEL_UPLOAD_FILE = 'input[type="file"]'
 
-# ---------------------------
-# Register this marketplace
-# ---------------------------
-register_marketplace(
-    MARKETPLACE,
-    collector=collect_from_vinted,
-    checker=check_on_vinted,
-    uploader=upload_to_vinted
-)
 
 
 # ---------------------------
@@ -118,7 +109,6 @@ def upload_to_vinted(listing: dict):
     driver = visible_driver()
     ensure_logged_in(driver, LOGIN_SELECTOR, HOME_URL, MARKETPLACE)
     driver.get(UPLOAD_URL)
-    time.sleep(5)
 
     selectors = {
         "title": SEL_UPLOAD_TITLE,
@@ -131,3 +121,17 @@ def upload_to_vinted(listing: dict):
 
     upload_listing_common(driver, listing, selectors)
     return driver
+
+
+
+
+
+# ---------------------------
+# Register this marketplace
+# ---------------------------
+register_marketplace(
+    MARKETPLACE,
+    collector=collect_from_vinted,
+    checker=check_on_vinted,
+    uploader=upload_to_vinted
+)

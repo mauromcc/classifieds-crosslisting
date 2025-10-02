@@ -9,7 +9,7 @@ from helpers.drivers import headless_driver
 from helpers.cookies import ensure_logged_in
 from helpers.abort import check_abort
 from helpers.images import download_image, compute_image_hashes, hamming_distance_hex
-from helpers.utils import is_match, vinted_title_shorten, scroll_to_load_all_items
+from helpers.utils import is_match, vinted_title_shorten, scroll_to_load_all_items, managed_driver
 
 
 # ---------------------------
@@ -21,10 +21,28 @@ def collect_listing_generic(url: str, marketplace: str, col_title, col_price, co
     Generic collector that handles both listing details AND images in one call.
     Returns complete listing dict ready to use.
     """
+    listing = {
+    "url": url, 
+    "source": marketplace,
+    "title": None, 
+    "price": None, 
+    "description": None, 
+    "images": [], 
+    "md5": None, 
+    "phash": None,
+    }
+
     # Get text details first
-    listing = collect_listing_details(
+    title, price, description = collect_listing_details(
         url, marketplace, col_title, col_price, col_desc, price_filter
     )
+
+    if title is None or price is None or description is None:
+        return _empty_listing(url, marketplace)
+
+    listing["title"] = title
+    listing["price"] = price
+    listing["description"] = description
     
     if check_abort():
         return None
@@ -33,6 +51,9 @@ def collect_listing_generic(url: str, marketplace: str, col_title, col_price, co
     images, md5, phash = collect_listing_images(
         url, marketplace, first_img_selector, carousel_selector
     )
+
+    if images is None:
+        return _empty_listing(url, marketplace)
     
     listing["images"] = images
     listing["md5"] = md5
@@ -42,34 +63,23 @@ def collect_listing_generic(url: str, marketplace: str, col_title, col_price, co
 
 def collect_listing_details(url: str, marketplace: str, col_title, col_price, col_desc, price_filter=None) -> dict:
     """
-    Scrape title, price, description from a URL using BeautifulSoup.
+    Scrape title, price, and description, from a URL using BeautifulSoup.
     `price_filter` can be a lambda function to filter element attributes.
     """
-    listing = {
-        "url": url, 
-        "source": marketplace,
-        "title": None, 
-        "price": None, 
-        "description": None, 
-        "image_urls": [], 
-        "images": [], 
-        "md5": None, 
-        "phash": None,
-    }
 
     if check_abort():
         return None
 
     try:
-        r = requests.get(url, headers=HEADERS)
+        r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code != 200:
             print(f"❌ Error loading {marketplace.capitalize()} page: {r.status_code}")
-            return listing
+            return None, None, None
         soup = BeautifulSoup(r.text, "html.parser")
 
         # Title
         title_tag = soup.find(col_title) if isinstance(col_title, str) else soup.find(*col_title)
-        listing["title"] = title_tag.get_text(strip=True) if title_tag else None
+        title = title_tag.get_text(strip=True) if title_tag else None
 
         # Price
         if isinstance(col_price, list):
@@ -78,29 +88,29 @@ def collect_listing_details(url: str, marketplace: str, col_title, col_price, co
                 price_tag = soup.find(tag_name, {attr_name: price_filter})
             else:
                 price_tag = soup.find(tag_name, {attr_name: attr_val})
-            listing["price"] = price_tag.get_text(strip=True) if price_tag else None
+            price = price_tag.get_text(strip=True) if price_tag else None
         else:
             price_tag = soup.find(col_price)
-            listing["price"] = price_tag.get_text(strip=True) if price_tag else None
+            price = price_tag.get_text(strip=True) if price_tag else None
 
         # Description
         if isinstance(col_desc, list):
             tag_name, attr_name, attr_val = col_desc
             desc_tag = soup.find(tag_name, {attr_name: attr_val})
             if desc_tag:
-                listing["description"] = desc_tag.get("content") or desc_tag.get_text(" ", strip=True)
+                description = desc_tag.get("content") or desc_tag.get_text(" ", strip=True)
             else:
                 None
         else:
             desc_tag = soup.find(col_desc)
-            listing["description"] = desc_tag.get_text(" ", strip=True) if desc_tag else None
+            description = desc_tag.get_text(" ", strip=True) if desc_tag else None
 
-        print(f'\n---\nTitle: {listing["title"]}\nPrice: {listing["price"]}\nDescription: {listing["description"]}\n---')
+        print(f'\n---\nTitle: {title}\nPrice: {price}\nDescription: {description}\n---')
 
     except Exception as e:
         print(f"⚠️ Error scraping listing details: {e}")
 
-    return listing
+    return title, price, description
 
 def collect_listing_images(url: str, marketplace: str, first_img_selector=None, carousel_selector=None) -> list:
     """
@@ -110,18 +120,20 @@ def collect_listing_images(url: str, marketplace: str, first_img_selector=None, 
     images = []
 
     if check_abort():
-        return images
+        return None
 
-    print(f"🌍 Opening {marketplace.capitalize()} listing...") 
-    driver = headless_driver()
-    print("⏳ Retrieving images...")
+    print(f"🌍 Opening {marketplace.capitalize()} listing...")
+    driver = headless_driver() 
     try:
+        print("⏳ Retrieving images...")
         driver.get(url)
-        time.sleep(3)
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
+        # time.sleep(3)
 
         if check_abort():
-            return images
+            return None
 
+        elems = []
         if marketplace == "vinted":
             if first_img_selector:
                 try:
@@ -145,16 +157,17 @@ def collect_listing_images(url: str, marketplace: str, first_img_selector=None, 
     except Exception as e:
         print(f"⚠️ Error retrieving {marketplace.capitalize()} listing's images: {e}")
     finally:
+        if driver:
         try:
             driver.quit()
-        except:
+        except Exception:
             pass
 
     if check_abort():
-        return images
+        return None
 
     # Download images locally
-    images_local = [os.path.abspath(download_image(u)) for u in images]
+    images_local = [p for u in images if (p := safe_download_image(u)) is not None]
     if images_local:
         print(f"✅ Downloaded {len(images_local)} images.")
     else:
@@ -166,10 +179,17 @@ def collect_listing_images(url: str, marketplace: str, first_img_selector=None, 
         return images_local, md5, phash
 
     if check_abort():
-        return images
+        return None
 
     return images_local, None, None
 
+def safe_download_image(url: str) -> str | None:
+    """Download image to local temp folder, return absolute path or None if failed."""
+    try:
+        return os.path.abspath(download_image(url))
+    except Exception as e:
+        print(f"⚠️ Failed to download {url[:50]}...: {e}")
+        return None
 
 # ---------------------------
 # Checking
@@ -223,7 +243,8 @@ def find_listing_in_profile(listing, marketplace: str, driver, sel_items, sel_ti
         return None
 
     driver.get(driver.current_url)  # make sure page loaded
-    time.sleep(3)
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
+    # time.sleep(3)
 
     if check_abort(driver): 
         return None
@@ -291,19 +312,3 @@ def find_listing_in_profile(listing, marketplace: str, driver, sel_items, sel_ti
     return None
 
 
-
-
-
-def _empty_listing(url: str | None) -> dict:
-    """Return an empty listing structure."""
-    return {
-        "url": url,
-        "source": None,
-        "title": None,
-        "price": None,
-        "description": None,
-        "image_urls": [],
-        "images": [],
-        "md5": None,
-        "phash": None,
-    }
