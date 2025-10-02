@@ -2,6 +2,7 @@ import time, re
 
 from selenium.webdriver.common.by import By
 
+from constants import register_marketplace
 from helpers.scraping import collect_listing_generic, check_listing_existence, find_listing_in_profile
 from helpers.uploader import upload_listing_common
 from helpers.drivers import headless_driver, visible_driver

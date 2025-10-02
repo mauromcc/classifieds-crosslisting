@@ -11,9 +11,12 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
     Fill in listing for any marketplace given a dictionary of selectors.
     Expected selectors keys: title, description, price, category, category_option, file_input, continue_btn (optional)
     """
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
+    try:
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
+    except Exception:
+        pass
 
-    if check_abort():
+    if check_abort(driver):
         return None
 
     # Images
@@ -24,7 +27,7 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
         print(f"⚠️ Error uploading images: {e}")
         input("👉 Upload images manually, then press Enter to continue...")
 
-    if check_abort():
+    if check_abort(driver):
         return None
 
     # Title
@@ -39,7 +42,7 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
         print("⚠️ Title not filled automatically:", e)
         input("👉 Fill title manually, then press Enter to continue...")
 
-    if check_abort():
+    if check_abort(driver):
         return None
 
     # Description
@@ -54,7 +57,7 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
         print("⚠️ Description not filled automatically:", e)
         input("👉 Fill description manually, then press Enter to continue...")
 
-    if check_abort():
+    if check_abort(driver):
         return None
 
     # Price
@@ -70,7 +73,7 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
         print("⚠️ Price not filled automatically:", e)
         input("👉 Fill price manually, then press Enter to continue...")
 
-    if check_abort():
+    if check_abort(driver):
         return None
 
     # Category
@@ -88,6 +91,9 @@ def upload_listing_common(driver, listing: dict, selectors: dict):
     except Exception as e:
         print("⚠️ Category not selected automatically:", e)
         input("👉 Select category manually, then press Enter to continue...")
+
+    if check_abort(driver):
+        return None
 
     # Continue buttons if provided
     if "continue_btn" in selectors:
