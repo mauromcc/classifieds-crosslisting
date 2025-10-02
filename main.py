@@ -7,7 +7,7 @@ from helpers.parsing import detect_marketplace, check_required, choose_destinati
 
 
 # ---------------------------
-# Main loo
+# Main loop
 # ---------------------------
 
 def main():
