@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from selenium.webdriver.remote.webdriver import WebDriver
 
 from helpers.drivers import headless_driver, visible_driver
+from helpers.abort import check_abort
 
 
 
@@ -48,6 +49,9 @@ def scroll_to_load_all_items(driver: WebDriver, item_selector: str) -> list:
             rounds_no_change = 0
         else:
             rounds_no_change += 1
+
+        if check_abort(driver): 
+            return None
 
     items = driver.find_elements("css selector", item_selector)
         

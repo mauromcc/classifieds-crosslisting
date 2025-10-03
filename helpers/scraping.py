@@ -16,10 +16,10 @@ from helpers.utils import is_match, scroll_to_load_all_items
 # Collecting
 # ---------------------------
 
-def collect_listing_generic(url: str, marketplace: str, col_title, col_price, col_desc, first_img_selector=None, carousel_selector=None, price_filter=None) -> dict:
+def collect_listing_generic(url: str, marketplace: str, col_title, col_price, col_desc, first_img_selector=None, carousel_selector=None, price_filter=None) -> dict | None:
     """
     Generic collector that handles both listing details AND images in one call.
-    Returns complete listing dict ready to use.
+    Returns complete listing dict, or None if aborted.
     """
     listing = {
     "url": url, 
@@ -33,13 +33,14 @@ def collect_listing_generic(url: str, marketplace: str, col_title, col_price, co
     }
 
     # Get text details first
-    title, price, description = collect_listing_details(
-        url, marketplace, col_title, col_price, col_desc, price_filter
-    )
+    result = collect_listing_details(url, marketplace, col_title, col_price, col_desc, price_filter)
+    if result is None:  # aborted
+        return None
 
+    title, price, description = result
     if title is None or price is None or description is None:
         print(f"❌ Failed to collect required details from {marketplace.capitalize()}'s listing.")
-        return None
+        return listing  # incomplete but not aborted
 
     listing["title"] = title
     listing["price"] = price
@@ -49,13 +50,14 @@ def collect_listing_generic(url: str, marketplace: str, col_title, col_price, co
         return None
     
     # Get images
-    images, md5, phash = collect_listing_images(
-        url, marketplace, first_img_selector, carousel_selector
-    )
-
-    if images is None:
-        print(f"❌ Failed to collect images from {marketplace.capitalize()}'s listing.")
+    result = collect_listing_images(url, marketplace, first_img_selector, carousel_selector)
+    if result is None:  # aborted
         return None
+
+    images, md5, phash = result
+    if not images:
+        print(f"❌ Failed to collect images from {marketplace.capitalize()}'s listing.")
+        return listing  # incomplete but not aborted 
     
     listing["images"] = images
     listing["md5"] = md5
@@ -63,20 +65,20 @@ def collect_listing_generic(url: str, marketplace: str, col_title, col_price, co
     
     return listing
 
-def collect_listing_details(url: str, marketplace: str, col_title, col_price, col_desc, price_filter=None) -> dict:
+def collect_listing_details(url: str, marketplace: str, col_title, col_price, col_desc, price_filter=None) -> tuple[str, str, str] | None:
     """
     Scrape title, price, and description from a URL using BeautifulSoup.
-    Returns tuple: (title, price, description) or (None, None, None) on failure.
+    Returns (title, price, description) tuple, or None if aborted/failed.
     """
 
     if check_abort():
-        return None, None, None
+        return None
 
     try:
         r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code != 200:
             print(f"❌ Error loading {marketplace.capitalize()} page: {r.status_code}")
-            return None, None, None
+            return None
         soup = BeautifulSoup(r.text, "html.parser")
 
         # Title
@@ -112,28 +114,30 @@ def collect_listing_details(url: str, marketplace: str, col_title, col_price, co
 
     except Exception as e:
         print(f"⚠️ Error scraping listing details: {e}")
-        return None, None, None
+        return None
 
-def collect_listing_images(url: str, marketplace: str, first_img_selector=None, carousel_selector=None) -> list:
+def collect_listing_images(url: str, marketplace: str, first_img_selector=None, carousel_selector=None) -> tuple[list, str, str] | None:
     """
     Open page in headless driver and collect images.
-    Returns tuple: (images_local, md5, phash) or (None, None, None) on failure.
+    Returns (images_local, md5, phash) tuple, or None if aborted/failed.
     """
     if check_abort():
-        return None, None, None
+        return None
 
     images = []
     driver = None
 
     print(f"🌍 Opening {marketplace.capitalize()} listing...")
     try:
-        driver = headless_driver() 
+        driver = headless_driver()
+        if check_abort():
+            return None
         print("⏳ Retrieving images...")
         driver.get(url)
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
 
         if check_abort():
-            return None, None, None
+            return None
 
         elems = []
         if marketplace == "vinted":
@@ -150,14 +154,17 @@ def collect_listing_images(url: str, marketplace: str, first_img_selector=None, 
             elems = driver.find_elements(By.CSS_SELECTOR, "img")
         
         seen = set()
-        for img in elems:
-            src = img.get_attribute("src")
-            if (marketplace == "wallapop" and src and src not in seen and "cdn.wallapop.com" in src and "W640" in src) \
-            or (marketplace == "vinted" and src and src not in seen):
-                images.append(src)
-                seen.add(src)
-    except Exception as e:
-        print(f"⚠️ Error retrieving {marketplace.capitalize()} listing's images: {e}")
+        for i in range(len(elems)):
+            try:
+                img = elems[i]
+                src = img.get_attribute("src")
+                if (marketplace == "wallapop" and src and src not in seen and "cdn.wallapop.com" in src and "W640" in src) \
+                or (marketplace == "vinted" and src and src not in seen):
+                    images.append(src)
+                    seen.add(src)
+            except StaleElementReferenceException:
+                continue
+                print(f"⚠️ Error retrieving {marketplace.capitalize()} listing's images: {e}")
     finally:
         if driver:
             try:
@@ -166,25 +173,23 @@ def collect_listing_images(url: str, marketplace: str, first_img_selector=None, 
                 pass
 
     if check_abort():
-        return None, None, None
+        return None
 
     # Download images locally
     images_local = [p for u in images if (p := safe_download_image(u)) is not None]
     if images_local:
-        print(f"✅ Downloaded {len(images_local)} images.")
+        print(f"✅ Downloaded {len(images_local)} images")
     else:
-        print("❌ No images downloaded.")
-        return None, None, None
+        print("❌ No images downloaded")
+        return ([], None, None)  # failed but not aborted
 
     # Compute hashes for first image
-    if images:
-        md5, phash = compute_image_hashes(images[0])
-        return images_local, md5, phash
-
+    md5, phash = compute_image_hashes(images[0]) if images else (None, None)
+        
     if check_abort():
-        return None, None, None
+        return None
 
-    return images_local, None, None
+    return images_local, md5, phash
 
 def safe_download_image(url: str) -> str | None:
     """Download image to local temp folder, return absolute path or None if failed."""
@@ -197,24 +202,29 @@ def safe_download_image(url: str) -> str | None:
 # ---------------------------
 # Checking
 # ---------------------------
-def check_listing_existence(listing, marketplace: str, login_selector: str, home_url: str, profile_url_resolver, sel_items: str, sel_title: str, sel_img, title_extractor, image_extractor) -> str | None:
+def check_listing_existence(listing, marketplace: str, login_selector: str, home_url: str, profile_url_resolver, chk_items: str, chk_title: str, chk_img, title_extractor, image_extractor) -> str | None:
     """
     Generic skeleton for marketplace 'check' functions.
-    Marketplace-specific profile URL logic and extractors are injected.
+    Returns URL if found, None if not found or aborted.
     """
 
     driver = None
     try:
         print(f"🔍 Checking if listing exists on {marketplace.capitalize()}...")
         driver = headless_driver()
+        if check_abort():
+            return None
         driver = ensure_logged_in(driver, login_selector, home_url, marketplace)
         if not driver:
-            print(f"❌ Could not log in to {marketplace.capitalize()}.")
+            print(f"❌ Could not log in to {marketplace.capitalize()}")
+            return None
+
+        if check_abort(driver):
             return None
 
         profile_url = profile_url_resolver(driver)
         if not profile_url:
-            print(f"❌ Could not determine profile URL for {marketplace.capitalize()}.")
+            print(f"❌ Could not determine profile URL for {marketplace.capitalize()}")
             return None
 
         driver.get(profile_url)
@@ -222,7 +232,7 @@ def check_listing_existence(listing, marketplace: str, login_selector: str, home
         if check_abort(driver):
             return None
 
-        return find_listing_in_profile(listing, marketplace, driver, sel_items, sel_title, sel_img, title_extractor, image_extractor)
+        return find_listing_in_profile(listing, marketplace, driver, chk_items, chk_title, chk_img, title_extractor, image_extractor)
 
     except Exception as e:
         print(f"⚠️ {marketplace.capitalize()} check error: {e}")
@@ -235,15 +245,14 @@ def check_listing_existence(listing, marketplace: str, login_selector: str, home
             except Exception:
                 pass
 
-    return None
-
-def find_listing_in_profile(listing, marketplace: str, driver, sel_items, sel_title, sel_img, title_extractor, image_extractor, hamming_thresh=6) -> str | None:
+def find_listing_in_profile(listing, marketplace: str, driver, chk_items, chk_title, chk_img, title_extractor, image_extractor, hamming_thresh=6) -> str | None:
     """
     Scroll through profile items and match by title first, then images.
-    Uses marketplace-specific extractors injected from each module.
+    Returns URL if found, None otherwise.
     """
     if not driver:
         return None
+
     try:
         driver.get(driver.current_url)  # make sure page loaded
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
@@ -252,11 +261,13 @@ def find_listing_in_profile(listing, marketplace: str, driver, sel_items, sel_ti
             return None
 
         print("⏳ Scrolling profile page to load all listings...")
-        items = scroll_to_load_all_items(driver, sel_items)
-        if not items:
-            print(f"❌ No listings found on {marketplace.capitalize()}.")
+        items = scroll_to_load_all_items(driver, chk_items)
+        if check_abort(driver): 
             return None
-        print(f"🟢 Found {len(items)} listings on {marketplace.capitalize()} profile.")
+        if not items:
+            print(f"❌ No listings found on {marketplace.capitalize()}")
+            return None
+        print(f"🟢 Found {len(items)} listings on {marketplace.capitalize()} profile")
 
         if check_abort(driver): 
             return None
@@ -264,9 +275,22 @@ def find_listing_in_profile(listing, marketplace: str, driver, sel_items, sel_ti
         # Match by title
         print("🔍 Checking listings by title to find a match...")
         for item in items:
+            if check_abort(driver):
+                return None
+
             try:
-                title_text = title_extractor(item, sel_title)
-                href = item.find_element(By.CSS_SELECTOR, sel_title).get_attribute("href")
+                title_text = title_extractor(item, chk_title)
+                try:
+                    if marketplace == "wallapop":
+                        href = item.get_attribute("href")
+                    elif marketplace == "vinted":
+                        href = item.find_element(By.CSS_SELECTOR, chk_title).get_attribute("href")
+                except:
+                        continue
+
+                if not href:
+                    print(f"⚠️ Found title '{title_text}' but href is None, skipping...")
+                    continue
 
                 if title_text and is_match(listing["title"], title_text):
                     print(f"✅ Match found by title: {title_text} -> {href}")
@@ -276,16 +300,24 @@ def find_listing_in_profile(listing, marketplace: str, driver, sel_items, sel_ti
                 print(f"⚠️ Title parse error: {e}")
                 continue
 
-            if check_abort(driver): 
-                return None
-
 
         # Match by image
-        print("🔍 No title match found, checking by image hashes...")
+        print("❌ No title match found")
+        print("🔍 Checking listings by image hashes to find a match...")
         for item in items:
+            if check_abort(driver):
+                return None
+
             try:
-                href = item.find_element(By.CSS_SELECTOR, sel_title).get_attribute("href")
-                img_url = image_extractor(item, sel_img)
+                try:
+                    if marketplace == "wallapop":
+                        href = item.get_attribute("href")
+                    elif marketplace == "vinted":
+                        href = item.find_element(By.CSS_SELECTOR, chk_title).get_attribute("href")
+                except:
+                    continue
+
+                img_url = image_extractor(item, chk_img)
                 
                 if img_url:
                     cand_md5, cand_phash = compute_image_hashes(img_url)
@@ -308,8 +340,7 @@ def find_listing_in_profile(listing, marketplace: str, driver, sel_items, sel_ti
                 print(f"⚠️ Item parse error (image check): {e}")
                 continue
 
-            if check_abort(driver): 
-                return None
+        print("❌ No image hash match found")
 
     except Exception as e:
         print(f"⚠️ Error in find_listing_in_profile: {e}")

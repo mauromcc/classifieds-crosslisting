@@ -4,7 +4,7 @@ from selenium.webdriver.common.by import By
 
 from constants import register_marketplace
 from helpers.scraping import collect_listing_generic, check_listing_existence, find_listing_in_profile
-from helpers.uploader import upload_listing_common
+from helpers.uploader import upload_listing_generic
 from helpers.drivers import headless_driver, visible_driver
 from helpers.cookies import ensure_logged_in
 from helpers.utils import vinted_title_shorten
@@ -28,17 +28,23 @@ COL_ITEM_HTML_DESCRIPTION = ["div", "itemprop", "description"]
 COL_ITEM_FIRST_IMG = "img[data-testid^='item-photo']"
 COL_ITEM_CAROUSEL_IMGS = "img[data-testid='image-carousel-image-shown'], img[data-testid='image-carousel-image']"
 
-SEL_PROFILE_ITEMS = "div[data-testid='grid-item']"
-SEL_PROFILE_TITLE = "a.new-item-box__overlay--clickable"
-SEL_PROFILE_IMG = "img.web_ui__Image__content"
+CHK_PROFILE_ITEMS = "div[data-testid='grid-item']"
+CHK_PROFILE_TITLE = "a.new-item-box__overlay--clickable"
+CHK_PROFILE_IMG = "img.web_ui__Image__content"
 
-SEL_UPLOAD_TITLE = "title"
-SEL_UPLOAD_DESCRIPTION = "description"
-SEL_UPLOAD_PRICE = "price"
-SEL_UPLOAD_CATEGORY = "category"
-SEL_UPLOAD_CATEGORY_OPTION = "[id^='catalog-suggestion-']"
-SEL_UPLOAD_FILE = 'input[type="file"]'
-
+UPL_ITEM_TITLE = (By.ID, "title")
+UPL_ITEM_DESCRIPTION = (By.ID, "description")
+UPL_ITEM_PRICE = (By.ID, "price")
+UPL_ITEM_CATEGORY = (By.ID, "category")
+UPL_ITEM_CATEGORY_OPTION = (By.CSS_SELECTOR, "[id^='catalog-suggestion-']")
+UPL_ITEM_FILE = (By.CSS_SELECTOR, 'input[type="file"]')
+UPLOAD_SEQUENCE = [
+    "images",
+    "title",
+    "description",
+    "price",
+    "category"
+]
 
 
 # ---------------------------
@@ -66,9 +72,9 @@ def check_on_vinted(listing) -> str | None:
         LOGIN_SELECTOR,
         HOME_URL,
         vinted_profile_resolver,
-        SEL_PROFILE_ITEMS,
-        SEL_PROFILE_TITLE,
-        SEL_PROFILE_IMG,
+        CHK_PROFILE_ITEMS,
+        CHK_PROFILE_TITLE,
+        CHK_PROFILE_IMG,
         vinted_title_extractor,
         vinted_image_extractor
     )
@@ -85,19 +91,19 @@ def vinted_profile_resolver(driver):
         print(f"❌ Could not extract {MARKETPLACE.capitalize()} user ID.")
         return None
 
-def vinted_title_extractor(item, sel_title):
+def vinted_title_extractor(item, chk_title):
     """Extracts and shortens the title string for Vinted items."""
     try:
-        elem = item.find_element(By.CSS_SELECTOR, sel_title)
+        elem = item.find_element(By.CSS_SELECTOR, chk_title)
         raw_title = elem.get_attribute("title").strip()
         return vinted_title_shorten(raw_title)
     except:
         return None
 
-def vinted_image_extractor(item, sel_img):
+def vinted_image_extractor(item, chk_img):
     """Extracts the main image URL for Vinted items."""
     try:
-        img_elem = item.find_element(By.CSS_SELECTOR, sel_img)
+        img_elem = item.find_element(By.CSS_SELECTOR, chk_img)
         return img_elem.get_attribute("src").split("?")[0]
     except:
         return None
@@ -106,20 +112,21 @@ def vinted_image_extractor(item, sel_img):
 # Uploader
 # ---------------------------
 def upload_to_vinted(listing: dict):
+    print(f"🌍 Opening {MARKETPLACE.capitalize()} upload page...")
     driver = visible_driver()
     ensure_logged_in(driver, LOGIN_SELECTOR, HOME_URL, MARKETPLACE)
     driver.get(UPLOAD_URL)
 
     selectors = {
-        "title": SEL_UPLOAD_TITLE,
-        "description": SEL_UPLOAD_DESCRIPTION,
-        "price": SEL_UPLOAD_PRICE,
-        "category": SEL_UPLOAD_CATEGORY,
-        "category_option": SEL_UPLOAD_CATEGORY_OPTION,
-        "file_input": SEL_UPLOAD_FILE
+        "title": UPL_ITEM_TITLE,
+        "description": UPL_ITEM_DESCRIPTION,
+        "price": UPL_ITEM_PRICE,
+        "category": UPL_ITEM_CATEGORY,
+        "category_option": UPL_ITEM_CATEGORY_OPTION,
+        "file_input": UPL_ITEM_FILE
     }
 
-    upload_listing_common(driver, listing, selectors)
+    upload_listing_generic(driver, listing, selectors, marketplace=MARKETPLACE, sequence=UPLOAD_SEQUENCE)
     return driver
 
 

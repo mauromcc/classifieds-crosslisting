@@ -19,6 +19,9 @@ def detect_marketplace(url: str) -> str | None:
 
 def check_required(listing: dict) -> bool:
     """Verify all required fields are present in listing."""
+    if not listing:  # catches None or empty dict
+        return False
+
     missing = [k for k in REQUIRED_FIELDS if not listing.get(k)]
     if missing:
         print("❌ Missing required fields:", ", ".join(missing))

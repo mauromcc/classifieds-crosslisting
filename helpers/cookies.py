@@ -23,7 +23,7 @@ def save_cookies(driver, marketplace: str):
         return
     with open(path, "wb") as f:
         pickle.dump(cookies, f)
-    print(f"✅ Saved {len(cookies)} cookies for {marketplace.capitalize()}")
+    print(f"🍪 Saved {len(cookies)} cookies for {marketplace.capitalize()}")
 
 def load_cookies(driver, marketplace: str) -> list:
     """Load cookies from file, return them or empty list if not available."""
@@ -163,6 +163,8 @@ def ensure_logged_in(driver, login_check_selector: str, homepage_url: str, marke
             # Re-launch headless driver
             print(f"🌍 Back to headless mode with logged-in session.")
             driver = headless_driver()
+            if check_abort():
+                return None
             driver.get(homepage_url)
             apply_cookies(driver, load_cookies(driver, marketplace), homepage_url, marketplace)
             time.sleep(2)
