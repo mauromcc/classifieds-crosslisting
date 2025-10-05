@@ -31,7 +31,6 @@ def vinted_title_shorten(raw_title: str) -> str:
     return raw_title[:colon_idx].strip()
 
 
-
 def scroll_to_load_all_items(driver: WebDriver, item_selector: str) -> list:
     wait = 0.5
     rounds_no_new = 0

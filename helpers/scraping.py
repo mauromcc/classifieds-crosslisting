@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import StaleElementReferenceException
 
 from constants import HEADERS
 from helpers.drivers import headless_driver
@@ -16,7 +17,7 @@ from helpers.utils import is_match, scroll_to_load_all_items
 # Collecting
 # ---------------------------
 
-def collect_listing_generic(url: str, marketplace: str, col_title, col_price, col_desc, first_img_selector=None, carousel_selector=None, price_filter=None) -> dict | None:
+def collect_listing_generic(url: str, marketplace: str, col_selectors) -> dict | None:
     """
     Generic collector that handles both listing details AND images in one call.
     Returns complete listing dict, or None if aborted.
@@ -33,7 +34,7 @@ def collect_listing_generic(url: str, marketplace: str, col_title, col_price, co
     }
 
     # Get text details first
-    result = collect_listing_details(url, marketplace, col_title, col_price, col_desc, price_filter)
+    result = collect_listing_details(url, marketplace, col_selectors)
     if result is None:  # aborted
         return None
 
@@ -50,7 +51,7 @@ def collect_listing_generic(url: str, marketplace: str, col_title, col_price, co
         return None
     
     # Get images
-    result = collect_listing_images(url, marketplace, first_img_selector, carousel_selector)
+    result = collect_listing_images(url, marketplace, col_selectors)
     if result is None:  # aborted
         return None
 
@@ -65,7 +66,7 @@ def collect_listing_generic(url: str, marketplace: str, col_title, col_price, co
     
     return listing
 
-def collect_listing_details(url: str, marketplace: str, col_title, col_price, col_desc, price_filter=None) -> tuple[str, str, str] | None:
+def collect_listing_details(url: str, marketplace: str, col_selectors) -> tuple[str, str, str] | None:
     """
     Scrape title, price, and description from a URL using BeautifulSoup.
     Returns (title, price, description) tuple, or None if aborted/failed.
@@ -82,31 +83,31 @@ def collect_listing_details(url: str, marketplace: str, col_title, col_price, co
         soup = BeautifulSoup(r.text, "html.parser")
 
         # Title
-        title_tag = soup.find(col_title) if isinstance(col_title, str) else soup.find(*col_title)
+        title_tag = soup.find(col_selectors["col_title"]) if isinstance(col_selectors["col_title"], str) else soup.find(*col_selectors["col_title"])
         title = title_tag.get_text(strip=True) if title_tag else None
 
         # Price
-        if isinstance(col_price, list):
-            tag_name, attr_name, attr_val = col_price
-            if price_filter:
-                price_tag = soup.find(tag_name, {attr_name: price_filter})
+        if isinstance(col_selectors["col_price"], list):
+            tag_name, attr_name, attr_val = col_selectors["col_price"]
+            if col_selectors["col_price_filter"]:
+                price_tag = soup.find(tag_name, {attr_name: col_selectors["col_price_filter"]})
             else:
                 price_tag = soup.find(tag_name, {attr_name: attr_val})
             price = price_tag.get_text(strip=True) if price_tag else None
         else:
-            price_tag = soup.find(col_price)
+            price_tag = soup.find(col_selectors["col_price"])
             price = price_tag.get_text(strip=True) if price_tag else None
 
         # Description
-        if isinstance(col_desc, list):
-            tag_name, attr_name, attr_val = col_desc
+        if isinstance(col_selectors["col_description"], list):
+            tag_name, attr_name, attr_val = col_selectors["col_description"]
             desc_tag = soup.find(tag_name, {attr_name: attr_val})
             if desc_tag:
                 description = desc_tag.get("content") or desc_tag.get_text(" ", strip=True)
             else:
                 description = None
         else:
-            desc_tag = soup.find(col_desc)
+            desc_tag = soup.find(col_selectors["col_description"])
             description = desc_tag.get_text(" ", strip=True) if desc_tag else None
 
         print(f'\n---\nTitle: {title}\nPrice: {price}\nDescription: {description}\n---')
@@ -116,7 +117,7 @@ def collect_listing_details(url: str, marketplace: str, col_title, col_price, co
         print(f"⚠️ Error scraping listing details: {e}")
         return None
 
-def collect_listing_images(url: str, marketplace: str, first_img_selector=None, carousel_selector=None) -> tuple[list, str, str] | None:
+def collect_listing_images(url: str, marketplace: str, col_selectors) -> tuple[list, str, str] | None:
     """
     Open page in headless driver and collect images.
     Returns (images_local, md5, phash) tuple, or None if aborted/failed.
@@ -139,32 +140,8 @@ def collect_listing_images(url: str, marketplace: str, first_img_selector=None, 
         if check_abort():
             return None
 
-        elems = []
-        if marketplace == "vinted":
-            if first_img_selector:
-                try:
-                    first_img = driver.find_element(By.CSS_SELECTOR, first_img_selector)
-                    driver.execute_script("arguments[0].click();", first_img)
-                    time.sleep(0.5)
-                except Exception:
-                    pass
-            if carousel_selector:
-                elems = driver.find_elements(By.CSS_SELECTOR, carousel_selector)
-        elif marketplace == "wallapop":
-            elems = driver.find_elements(By.CSS_SELECTOR, "img")
-        
-        seen = set()
-        for i in range(len(elems)):
-            try:
-                img = elems[i]
-                src = img.get_attribute("src")
-                if (marketplace == "wallapop" and src and src not in seen and "cdn.wallapop.com" in src and "W640" in src) \
-                or (marketplace == "vinted" and src and src not in seen):
-                    images.append(src)
-                    seen.add(src)
-            except StaleElementReferenceException:
-                continue
-                print(f"⚠️ Error retrieving {marketplace.capitalize()} listing's images: {e}")
+        images = col_selectors["col_img_extractor"](driver)
+
     finally:
         if driver:
             try:
@@ -202,19 +179,18 @@ def safe_download_image(url: str) -> str | None:
 # ---------------------------
 # Checking
 # ---------------------------
-def check_listing_existence(listing, marketplace: str, login_selector: str, home_url: str, profile_url_resolver, chk_items: str, chk_title: str, chk_img, title_extractor, image_extractor) -> str | None:
+def check_listing_existence(listing, marketplace: str, chk_selectors) -> str | None:
     """
     Generic skeleton for marketplace 'check' functions.
     Returns URL if found, None if not found or aborted.
     """
-
     driver = None
     try:
         print(f"🔍 Checking if listing exists on {marketplace.capitalize()}...")
         driver = headless_driver()
         if check_abort():
             return None
-        driver = ensure_logged_in(driver, login_selector, home_url, marketplace)
+        driver = ensure_logged_in(driver, chk_selectors["login_selector"], chk_selectors["home_url"], marketplace)
         if not driver:
             print(f"❌ Could not log in to {marketplace.capitalize()}")
             return None
@@ -222,7 +198,7 @@ def check_listing_existence(listing, marketplace: str, login_selector: str, home
         if check_abort(driver):
             return None
 
-        profile_url = profile_url_resolver(driver)
+        profile_url = chk_selectors["profile_url_resolver"](driver)
         if not profile_url:
             print(f"❌ Could not determine profile URL for {marketplace.capitalize()}")
             return None
@@ -232,7 +208,7 @@ def check_listing_existence(listing, marketplace: str, login_selector: str, home
         if check_abort(driver):
             return None
 
-        return find_listing_in_profile(listing, marketplace, driver, chk_items, chk_title, chk_img, title_extractor, image_extractor)
+        return find_listing_in_profile(driver, listing, marketplace, chk_selectors)
 
     except Exception as e:
         print(f"⚠️ {marketplace.capitalize()} check error: {e}")
@@ -245,7 +221,7 @@ def check_listing_existence(listing, marketplace: str, login_selector: str, home
             except Exception:
                 pass
 
-def find_listing_in_profile(listing, marketplace: str, driver, chk_items, chk_title, chk_img, title_extractor, image_extractor, hamming_thresh=6) -> str | None:
+def find_listing_in_profile(driver, listing, marketplace: str, chk_selectors, hamming_thresh=6) -> str | None:
     """
     Scroll through profile items and match by title first, then images.
     Returns URL if found, None otherwise.
@@ -261,7 +237,7 @@ def find_listing_in_profile(listing, marketplace: str, driver, chk_items, chk_ti
             return None
 
         print("⏳ Scrolling profile page to load all listings...")
-        items = scroll_to_load_all_items(driver, chk_items)
+        items = scroll_to_load_all_items(driver, chk_selectors["chk_items"])
         if check_abort(driver): 
             return None
         if not items:
@@ -279,14 +255,12 @@ def find_listing_in_profile(listing, marketplace: str, driver, chk_items, chk_ti
                 return None
 
             try:
-                title_text = title_extractor(item, chk_title)
+                title_text = chk_selectors["chk_title_extractor"](item, chk_selectors["chk_title"])
                 try:
-                    if marketplace == "wallapop":
-                        href = item.get_attribute("href")
-                    elif marketplace == "vinted":
-                        href = item.find_element(By.CSS_SELECTOR, chk_title).get_attribute("href")
-                except:
-                        continue
+                    href = chk_selectors["chk_href_extractor"](item, chk_selectors["chk_title"])
+                except Exception as e:
+                    print(f"⚠️ Href parse error: {e}")
+                    continue
 
                 if not href:
                     print(f"⚠️ Found title '{title_text}' but href is None, skipping...")
@@ -307,17 +281,14 @@ def find_listing_in_profile(listing, marketplace: str, driver, chk_items, chk_ti
         for item in items:
             if check_abort(driver):
                 return None
-
             try:
                 try:
-                    if marketplace == "wallapop":
-                        href = item.get_attribute("href")
-                    elif marketplace == "vinted":
-                        href = item.find_element(By.CSS_SELECTOR, chk_title).get_attribute("href")
-                except:
+                    href = chk_selectors["chk_href_extractor"](item, chk_selectors["chk_title"])
+                except Exception as e:
+                    print(f"⚠️ Href parse error: {e}")
                     continue
 
-                img_url = image_extractor(item, chk_img)
+                img_url = chk_selectors["chk_image_extractor"](item, chk_selectors["chk_img"])
                 
                 if img_url:
                     cand_md5, cand_phash = compute_image_hashes(img_url)

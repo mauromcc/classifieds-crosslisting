@@ -77,10 +77,10 @@ def check_existing_in_other_marketplaces(listing: dict):
 # ---------------------------
 # Uploader
 # ---------------------------
-def choose_destination(source: str, listing: dict) -> str | None:
+def choose_destination(listing: dict) -> str | None:
     """Let user choose a destination marketplace, excluding source and existing."""
     # Get all marketplaces except source
-    destinations = [m for m in MARKETPLACES.keys() if m != source]
+    destinations = [m for m in MARKETPLACES.keys() if m != listing["source"]]
     skipped = []
 
     # Remove marketplaces where item already exists
@@ -112,7 +112,7 @@ def choose_destination(source: str, listing: dict) -> str | None:
 
     return destinations[int(choice) - 1]
 
-def upload_listing(destination: str, listing: dict):
+def upload_listing(listing: dict, destination: str):
     """Upload listing using the registered uploader function."""
     config = MARKETPLACES.get(destination)
     

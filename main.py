@@ -45,7 +45,7 @@ def main():
                 continue
 
             # Step 2: Choose upload destination (exclude source and marketplaces where it exists already)
-            destination = choose_destination(listing["source"], listing)
+            destination = choose_destination(listing)
             if not destination:
                 continue
 
@@ -53,7 +53,7 @@ def main():
                 continue
 
             # Step 3: Upload to destination
-            driver = upload_listing(destination, listing)
+            driver = upload_listing(listing, destination)
 
         except Exception as e:
             print("\n❌ An error occurred:", e)

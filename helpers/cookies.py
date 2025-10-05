@@ -1,5 +1,7 @@
 import os, time, pickle
 
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
 from constants import SCRIPT_DIR
@@ -90,13 +92,13 @@ def apply_cookies(driver, cookies: list, homepage_url: str, marketplace: str):
         return None
 
     driver.get(homepage_url)
-    time.sleep(2)
+    time.sleep(1)
     return added > 0
 
 def is_logged_in(driver, login_check_selector: str) -> bool:
     """Check if logged in by looking for an element that only exists when logged in."""
     try:
-        driver.find_element(By.CSS_SELECTOR, login_check_selector)
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, login_check_selector)))
         return True
     except:
         return False
@@ -114,7 +116,6 @@ def ensure_logged_in(driver, login_check_selector: str, homepage_url: str, marke
     """
     print(f"🌍 Confirming if logged in on {marketplace.capitalize()}...")
     driver.get(homepage_url)
-    time.sleep(2)
 
     if check_abort(driver): 
         return None
@@ -148,7 +149,6 @@ def ensure_logged_in(driver, login_check_selector: str, homepage_url: str, marke
 
         visible = visible_driver()
         visible.get(homepage_url)
-        time.sleep(2)
 
         input(f"❗ Please log in manually in the opened browser window for {marketplace.capitalize()}.\n👉 Press Enter here once you're logged in...")
 
@@ -167,7 +167,6 @@ def ensure_logged_in(driver, login_check_selector: str, homepage_url: str, marke
                 return None
             driver.get(homepage_url)
             apply_cookies(driver, load_cookies(driver, marketplace), homepage_url, marketplace)
-            time.sleep(2)
             return driver 
 
         else:
