@@ -6,15 +6,48 @@ from selenium.webdriver.common.by import By
 from helpers.abort import check_abort
 
 
-def upload_listing_generic(driver, listing: dict, marketplace: str, upl_selectors: dict, upl_sequence: list):
+
+def upload_listing_generic(driver, listing: dict, marketplace: str, config: dict):
     """
-    Fill in listing for any marketplace given a dictionary of selectors.
-    Expected selectors keys: title, description, price, category, category_option, file_input, continue_btn (optional)
+    Fill in listing for any marketplace using config dict.
+    Config should contain: upl_title, upl_description, upl_price, upl_category, etc.
     """
     try:
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["col_image_css"]))
     except Exception:
         pass
+
+    upl_sequence = config.get("upl_sequence", [])
+
+    # React-compatible input setter script (works for both input and textarea)
+    REACT_INPUT_SCRIPT = """
+        const element = arguments[0];
+        const value = arguments[1];
+        
+        // Focus the element first
+        element.focus();
+        
+        // For React: use the native setter to bypass React's value tracking
+        const isTextarea = element.tagName.toLowerCase() === 'textarea';
+        const prototype = isTextarea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        
+        const nativeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value').set;
+        nativeValueSetter.call(element, value);
+        
+        // Trigger input event that React listens to
+        const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+        element.dispatchEvent(inputEvent);
+        
+        // Also trigger change event
+        const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+        element.dispatchEvent(changeEvent);
+        
+        // Trigger blur to validate
+        element.blur();
+        
+        // Focus again to show the value
+        element.focus();
+    """
 
     for step in upl_sequence:
         if check_abort(driver):
@@ -23,15 +56,15 @@ def upload_listing_generic(driver, listing: dict, marketplace: str, upl_selector
         if step == "images":
             print("⏳ Uploading images...")
             try:
-                WebDriverWait(driver, 10).until(EC.presence_of_element_located(upl_selectors["upl_image_input"]))
-                driver.find_element(*upl_selectors["upl_image_input"]).send_keys("\n".join(listing["images"]))
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["upl_image_input"]))
+                driver.find_element(*config["upl_image_input"]).send_keys("\n".join(listing["images"]))
             except Exception as e:
                 print(f"⚠️ Error uploading images: {e}")
                 input("👉 Upload images manually, then press Enter to continue...")
 
             while True:
                 try:
-                    previews = WebDriverWait(driver, 10).until(EC.presence_of_element_located(upl_selectors["upl_image_preview"]))
+                    previews = WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["upl_image_preview"]))
                 except Exception:
                     pass
                 if previews:
@@ -46,23 +79,22 @@ def upload_listing_generic(driver, listing: dict, marketplace: str, upl_selector
         elif step == "title":
             while True:
                 try:
-                    title_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located(upl_selectors["upl_title"]))
-                    title_input.clear()
-                    driver.execute_script("""
-                    arguments[0].focus();
-                    arguments[0].value = arguments[1];
-                    arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                    arguments[0].blur();
-                    """, title_input, listing["title"])
+                    title_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["upl_title"]))
+                    title_input.click()  # Click to focus naturally first
+                    time.sleep(0.2)
+                    title_input.clear()  # Clear the field
+                    time.sleep(0.1)
+                    driver.execute_script(REACT_INPUT_SCRIPT, title_input, listing["title"])  # Use React-compatible setter
+                    time.sleep(0.3)
                 except Exception as e:
                     print("⚠️ Title not filled automatically:", e)
+                
                 # verify
                 try:
                     val = title_input.get_attribute("value") or title_input.get_attribute("textContent") or title_input.text or ""
                 except Exception:
                     val = ""
-                if listing["title"] == val:
+                if listing["title"] == val or listing["title"] in val:
                     print("✅ Title filled")
                     break
                 input("👉 Fill title manually, then press Enter to continue...")
@@ -70,21 +102,21 @@ def upload_listing_generic(driver, listing: dict, marketplace: str, upl_selector
         elif step == "description":
             while True:
                 try:
-                    desc_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located(upl_selectors["upl_description"]))
+                    desc_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["upl_description"]))
                     keep_ai = False
-                    if upl_selectors["upl_desc_resolver"]:
-                        keep_ai = upl_selectors["upl_desc_resolver"](driver=driver, desc_input=desc_input, scraped_desc=listing["description"])
+                    
+                    if config.get("upl_desc_resolver"):
+                        keep_ai = config["upl_desc_resolver"](driver=driver, desc_input=desc_input, scraped_desc=listing["description"])
                     else:
-                        desc_input.clear()
-                        driver.execute_script("""
-                        arguments[0].focus();
-                        arguments[0].value = arguments[1];
-                        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-                        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                        arguments[0].blur();
-                        """, desc_input, listing["description"])
+                        desc_input.click()  # Click to focus
+                        time.sleep(0.2)
+                        desc_input.clear()  # Clear the field
+                        time.sleep(0.1)
+                        driver.execute_script(REACT_INPUT_SCRIPT, desc_input, listing["description"])  # Use React-compatible setter
+                        time.sleep(0.3)
                 except Exception as e:
                     print("⚠️ Description not filled:", e)
+                
                 # verify
                 try:
                     val = desc_input.get_attribute("value") or desc_input.get_attribute("textContent") or desc_input.text or ""
@@ -100,17 +132,18 @@ def upload_listing_generic(driver, listing: dict, marketplace: str, upl_selector
             while True:
                 try:
                     price_cleaned = listing["price"].replace("€", "").replace(",", ".").strip()
-                    price_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located(upl_selectors["upl_price"]))
-                    price_input.clear()
-                    driver.execute_script("""
-                    arguments[0].focus();
-                    arguments[0].value = arguments[1];
-                    arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                    arguments[0].blur();
-                    """, price_input, price_cleaned)
+                    price_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["upl_price"]))
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", price_input)  # Scroll element into view
+                    time.sleep(0.2)
+                    driver.execute_script("arguments[0].click();", price_input)  # Click using JavaScript to bypass overlapping elements
+                    time.sleep(0.2)
+                    price_input.clear()  # Clear the field
+                    time.sleep(0.1)
+                    driver.execute_script(REACT_INPUT_SCRIPT, price_input, price_cleaned)  # Use React-compatible setter
+                    time.sleep(0.3)
                 except Exception as e:
                     print("⚠️ Price not filled automatically:", e)
+                
                 # verify
                 try:
                     val = price_input.get_attribute("value") or price_input.get_attribute("textContent") or price_input.text or ""
@@ -124,7 +157,7 @@ def upload_listing_generic(driver, listing: dict, marketplace: str, upl_selector
 
         elif step == "category":
             try:
-                category_dropdown = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(upl_selectors["upl_category"]))
+                category_dropdown = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(config["upl_category"]))
                 category_dropdown.click()
                 time.sleep(0.5)
                 print("✅ Category dropdown opened")
@@ -142,10 +175,16 @@ def upload_listing_generic(driver, listing: dict, marketplace: str, upl_selector
                     input("👉 Select category manually, then press Enter to continue...")
                     break
                 try:
-                    dropdown_is_open = upl_selectors["upl_category_resolver"](driver, category_dropdown)
+                    dropdown_is_open = config["upl_category_resolver"](driver, category_dropdown)
                     if dropdown_is_open:
                         time.sleep(0.5)
-                        first_option = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(upl_selectors["upl_category_first"]))
+                        first_option = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(config["upl_category_first"]))
+
+                        # Scroll the element into view
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_option)
+                        time.sleep(0.3)
+
+                        first_option = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(config["upl_category_first"]))
                         first_option.click()
                         print("✅ First recommended category selected")
                     else:
@@ -157,8 +196,10 @@ def upload_listing_generic(driver, listing: dict, marketplace: str, upl_selector
                     input("👉 Select category manually, then press Enter to continue...")
 
         elif step == "continue_btn":
+            if not config.get("upl_continue_btn"):
+                continue
             try:
-                btns = driver.find_elements(*upl_selectors["upl_continue_btn"])
+                btns = driver.find_elements(*config["upl_continue_btn"])
                 for btn in reversed(btns):
                     try:
                         WebDriverWait(driver, 10).until(lambda d: 

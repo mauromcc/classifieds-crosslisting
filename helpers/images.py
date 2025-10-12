@@ -10,12 +10,74 @@ except Exception:
     HAVE_IMAGEHASH = False
 
 from constants import SCRIPT_DIR, HEADERS
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import StaleElementReferenceException
 
 
 
 # ---------------------------
 # Image downloading / hashing
 # ---------------------------
+def extract_images_generic(driver, css_selector: str, filter_func=None, pre_extract_hook=None, marketplace: str = ""):
+    """
+    Generic image extractor that works for any marketplace.
+    
+    Args:
+        driver: Selenium WebDriver instance
+        css_selector: CSS selector to find image elements
+        filter_func: Optional function to filter images (takes src, returns bool)
+        pre_extract_hook: Optional function to run before extracting (e.g., click carousel)
+        marketplace: Name of marketplace (for error messages)
+    
+    Returns:
+        List of image URLs
+    """
+    images = []
+    
+    # Run any pre-extraction logic (e.g., click to open carousel)
+    if pre_extract_hook:
+        try:
+            pre_extract_hook(driver)
+        except Exception as e:
+            print(f"⚠️ Pre-extraction hook failed: {e}")
+    
+    try:
+        # Find all image elements and extract data IMMEDIATELY
+        elems = driver.find_elements(*css_selector)
+        seen = set()
+
+        for img in elems:
+            try:
+                src = img.get_attribute("src")
+                if not src or src in seen:  # Skip if no src or already seen
+                    continue
+                if filter_func and not filter_func(src):  # Apply filter if provided
+                    continue
+                
+                images.append(src)
+                seen.add(src)
+                
+            except StaleElementReferenceException:
+                continue
+            
+            except Exception as e:
+                print(f"⚠️ Unexpected error extracting image: {e}")
+                continue
+
+    except Exception as e:
+        if marketplace:
+            print(f"⚠️ Error retrieving {marketplace.capitalize()} listing's images: {e}")
+    
+    return images
+
+def safe_download_image(url: str) -> str | None:
+    """Download image to local temp folder, return absolute path or None if failed."""
+    try:
+        return os.path.abspath(download_image(url))
+    except Exception as e:
+        print(f"⚠️ Failed to download {url[:50]}...: {e}")
+        return None
+
 def download_image(url, folder="temp_images"):
     folder_path = os.path.join(SCRIPT_DIR, folder)
     os.makedirs(folder_path, exist_ok=True)

@@ -52,6 +52,6 @@ def scroll_to_load_all_items(driver: WebDriver, item_selector: str) -> list:
         if check_abort(driver): 
             return None
 
-    items = driver.find_elements("css selector", item_selector)
+    items = driver.find_elements(*item_selector)
         
     return items

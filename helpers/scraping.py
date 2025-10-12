@@ -9,7 +9,7 @@ from constants import HEADERS
 from helpers.drivers import headless_driver
 from helpers.cookies import ensure_logged_in
 from helpers.abort import check_abort
-from helpers.images import download_image, compute_image_hashes, hamming_distance_hex
+from helpers.images import safe_download_image, download_image, compute_image_hashes, hamming_distance_hex
 from helpers.utils import is_match, scroll_to_load_all_items
 
 
@@ -17,9 +17,10 @@ from helpers.utils import is_match, scroll_to_load_all_items
 # Collecting
 # ---------------------------
 
-def collect_listing_generic(url: str, marketplace: str, col_selectors) -> dict | None:
+def collect_listing_generic(url: str, marketplace: str, config: dict) -> dict | None:
     """
     Generic collector that handles both listing details AND images in one call.
+    Uses config dict that contains all selectors and extractor functions.
     Returns complete listing dict, or None if aborted.
     """
     listing = {
@@ -34,7 +35,7 @@ def collect_listing_generic(url: str, marketplace: str, col_selectors) -> dict |
     }
 
     # Get text details first
-    result = collect_listing_details(url, marketplace, col_selectors)
+    result = collect_listing_details(url, marketplace, config)
     if result is None:  # aborted
         return None
 
@@ -51,7 +52,7 @@ def collect_listing_generic(url: str, marketplace: str, col_selectors) -> dict |
         return None
     
     # Get images
-    result = collect_listing_images(url, marketplace, col_selectors)
+    result = collect_listing_images(url, marketplace, config)
     if result is None:  # aborted
         return None
 
@@ -66,7 +67,7 @@ def collect_listing_generic(url: str, marketplace: str, col_selectors) -> dict |
     
     return listing
 
-def collect_listing_details(url: str, marketplace: str, col_selectors) -> tuple[str, str, str] | None:
+def collect_listing_details(url: str, marketplace: str, config: dict) -> tuple[str, str, str] | None:
     """
     Scrape title, price, and description from a URL using BeautifulSoup.
     Returns (title, price, description) tuple, or None if aborted/failed.
@@ -83,31 +84,31 @@ def collect_listing_details(url: str, marketplace: str, col_selectors) -> tuple[
         soup = BeautifulSoup(r.text, "html.parser")
 
         # Title
-        title_tag = soup.find(col_selectors["col_title"]) if isinstance(col_selectors["col_title"], str) else soup.find(*col_selectors["col_title"])
+        title_tag = soup.find(config["col_title"]) if isinstance(config["col_title"], str) else soup.find(*config["col_title"])
         title = title_tag.get_text(strip=True) if title_tag else None
 
         # Price
-        if isinstance(col_selectors["col_price"], list):
-            tag_name, attr_name, attr_val = col_selectors["col_price"]
-            if col_selectors["col_price_filter"]:
-                price_tag = soup.find(tag_name, {attr_name: col_selectors["col_price_filter"]})
+        if isinstance(config["col_price"], list):
+            tag_name, attr_name, attr_val = config["col_price"]
+            if config["col_price_filter"]:
+                price_tag = soup.find(tag_name, {attr_name: config["col_price_filter"]})
             else:
                 price_tag = soup.find(tag_name, {attr_name: attr_val})
             price = price_tag.get_text(strip=True) if price_tag else None
         else:
-            price_tag = soup.find(col_selectors["col_price"])
+            price_tag = soup.find(config["col_price"])
             price = price_tag.get_text(strip=True) if price_tag else None
 
         # Description
-        if isinstance(col_selectors["col_description"], list):
-            tag_name, attr_name, attr_val = col_selectors["col_description"]
+        if isinstance(config["col_description"], list):
+            tag_name, attr_name, attr_val = config["col_description"]
             desc_tag = soup.find(tag_name, {attr_name: attr_val})
             if desc_tag:
                 description = desc_tag.get("content") or desc_tag.get_text(" ", strip=True)
             else:
                 description = None
         else:
-            desc_tag = soup.find(col_selectors["col_description"])
+            desc_tag = soup.find(config["col_description"])
             description = desc_tag.get_text(" ", strip=True) if desc_tag else None
 
         print(f'\n---\nTitle: {title}\nPrice: {price}\nDescription: {description}\n---')
@@ -117,7 +118,7 @@ def collect_listing_details(url: str, marketplace: str, col_selectors) -> tuple[
         print(f"⚠️ Error scraping listing details: {e}")
         return None
 
-def collect_listing_images(url: str, marketplace: str, col_selectors) -> tuple[list, str, str] | None:
+def collect_listing_images(url: str, marketplace: str, config: dict) -> tuple[list, str, str] | None:
     """
     Open page in headless driver and collect images.
     Returns (images_local, md5, phash) tuple, or None if aborted/failed.
@@ -135,12 +136,12 @@ def collect_listing_images(url: str, marketplace: str, col_selectors) -> tuple[l
             return None
         print("⏳ Retrieving images...")
         driver.get(url)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["col_image_css"]))
 
         if check_abort():
             return None
 
-        images = col_selectors["col_img_extractor"](driver)
+        images = config["col_image_extractor"](driver)
 
     finally:
         if driver:
@@ -168,18 +169,11 @@ def collect_listing_images(url: str, marketplace: str, col_selectors) -> tuple[l
 
     return images_local, md5, phash
 
-def safe_download_image(url: str) -> str | None:
-    """Download image to local temp folder, return absolute path or None if failed."""
-    try:
-        return os.path.abspath(download_image(url))
-    except Exception as e:
-        print(f"⚠️ Failed to download {url[:50]}...: {e}")
-        return None
 
 # ---------------------------
 # Checking
 # ---------------------------
-def check_listing_existence(listing, marketplace: str, chk_selectors) -> str | None:
+def check_listing_existence(listing, marketplace: str, config: dict) -> str | None:
     """
     Generic skeleton for marketplace 'check' functions.
     Returns URL if found, None if not found or aborted.
@@ -190,7 +184,7 @@ def check_listing_existence(listing, marketplace: str, chk_selectors) -> str | N
         driver = headless_driver()
         if check_abort():
             return None
-        driver = ensure_logged_in(driver, chk_selectors["login_selector"], chk_selectors["home_url"], marketplace)
+        driver = ensure_logged_in(driver, config["login_selector"], config["home_url"], marketplace)
         if not driver:
             print(f"❌ Could not log in to {marketplace.capitalize()}")
             return None
@@ -198,7 +192,7 @@ def check_listing_existence(listing, marketplace: str, chk_selectors) -> str | N
         if check_abort(driver):
             return None
 
-        profile_url = chk_selectors["profile_url_resolver"](driver)
+        profile_url = config["profile_url_resolver"](driver)
         if not profile_url:
             print(f"❌ Could not determine profile URL for {marketplace.capitalize()}")
             return None
@@ -208,7 +202,7 @@ def check_listing_existence(listing, marketplace: str, chk_selectors) -> str | N
         if check_abort(driver):
             return None
 
-        return find_listing_in_profile(driver, listing, marketplace, chk_selectors)
+        return find_listing_in_profile(driver, listing, marketplace, config)
 
     except Exception as e:
         print(f"⚠️ {marketplace.capitalize()} check error: {e}")
@@ -221,7 +215,7 @@ def check_listing_existence(listing, marketplace: str, chk_selectors) -> str | N
             except Exception:
                 pass
 
-def find_listing_in_profile(driver, listing, marketplace: str, chk_selectors, hamming_thresh=6) -> str | None:
+def find_listing_in_profile(driver, listing, marketplace: str, config: dict, hamming_thresh=6) -> str | None:
     """
     Scroll through profile items and match by title first, then images.
     Returns URL if found, None otherwise.
@@ -231,13 +225,13 @@ def find_listing_in_profile(driver, listing, marketplace: str, chk_selectors, ha
 
     try:
         driver.get(driver.current_url)  # make sure page loaded
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img")))
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["col_image_css"]))
 
         if check_abort(driver): 
             return None
 
         print("⏳ Scrolling profile page to load all listings...")
-        items = scroll_to_load_all_items(driver, chk_selectors["chk_items"])
+        items = scroll_to_load_all_items(driver, config["chk_items"])
         if check_abort(driver): 
             return None
         if not items:
@@ -255,9 +249,9 @@ def find_listing_in_profile(driver, listing, marketplace: str, chk_selectors, ha
                 return None
 
             try:
-                title_text = chk_selectors["chk_title_extractor"](item, chk_selectors["chk_title"])
+                title_text = config["chk_title_extractor"](item)
                 try:
-                    href = chk_selectors["chk_href_extractor"](item, chk_selectors["chk_title"])
+                    href = config["chk_href_extractor"](item)
                 except Exception as e:
                     print(f"⚠️ Href parse error: {e}")
                     continue
@@ -283,12 +277,12 @@ def find_listing_in_profile(driver, listing, marketplace: str, chk_selectors, ha
                 return None
             try:
                 try:
-                    href = chk_selectors["chk_href_extractor"](item, chk_selectors["chk_title"])
+                    href = config["chk_href_extractor"](item)
                 except Exception as e:
                     print(f"⚠️ Href parse error: {e}")
                     continue
 
-                img_url = chk_selectors["chk_image_extractor"](item, chk_selectors["chk_img"])
+                img_url = config["chk_image_extractor"](item)
                 
                 if img_url:
                     cand_md5, cand_phash = compute_image_hashes(img_url)

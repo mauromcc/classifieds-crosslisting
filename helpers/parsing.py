@@ -30,13 +30,13 @@ def check_required(listing: dict) -> bool:
 
 def collect_listing(url: str, source: str) -> dict:    
     """Collect listing details using the registered collector function."""
-    config = MARKETPLACES.get(source)
+    marketplace_data = MARKETPLACES.get(source)
     
-    if not config:
+    if not marketplace_data:
         print(f"❌ Unknown marketplace: {source}")
         return _empty_listing(url, source)
     
-    collector = config.get("collector")
+    collector = marketplace_data.get("collector")
     
     if not collector:
         print(f"❌ Collector not implemented for {source.capitalize()}")
@@ -52,11 +52,11 @@ def check_existing_in_other_marketplaces(listing: dict):
     """Check if listing exists in other marketplaces using registered checker functions."""
     source = listing.get("source")
     
-    for marketplace, config in MARKETPLACES.items():
+    for marketplace, marketplace_data in MARKETPLACES.items():
         if marketplace == source:
             continue
         
-        checker = config.get("checker")
+        checker = marketplace_data.get("checker")
         if not checker:
             print(f"⚠️ Checker not implemented for {marketplace.capitalize()}, skipping...")
             continue
@@ -114,13 +114,13 @@ def choose_destination(listing: dict) -> str | None:
 
 def upload_listing(listing: dict, destination: str):
     """Upload listing using the registered uploader function."""
-    config = MARKETPLACES.get(destination)
+    marketplace_data = MARKETPLACES.get(destination)
     
-    if not config:
+    if not marketplace_data:
         print(f"❌ Unknown marketplace: {destination}")
         return None
     
-    uploader = config.get("uploader")
+    uploader = marketplace_data.get("uploader")
     
     if not uploader:
         print(f"❌ Uploader not implemented for {destination.capitalize()}")
