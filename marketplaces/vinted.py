@@ -4,7 +4,8 @@ from selenium.webdriver.common.by import By
 from selenium.common.exceptions import StaleElementReferenceException
 
 from constants import register_marketplace
-from helpers.scraping import collect_listing_generic, check_listing_existence, find_listing_in_profile
+from helpers.scraping import collect_listing_generic, check_listing_existence
+from helpers.images import extract_images_generic
 from helpers.uploader import upload_listing_generic
 from helpers.drivers import headless_driver, visible_driver
 from helpers.cookies import ensure_logged_in
@@ -16,131 +17,109 @@ from helpers.abort import check_abort
 MARKETPLACE = "vinted"
 
 # ---------------------------
-# URLs & Selectors
+# Vinted-specific configuration
 # ---------------------------
-HOME_URL = "https://www.vinted.es/"
-PROFILE_URL = "https://www.vinted.es/member/"
-UPLOAD_URL = "https://www.vinted.es/items/new"
-LOGIN_SELECTOR = "button#user-menu-button"
-
-COL_ITEM_HTML_TITLE = "h1"
-COL_ITEM_HTML_PRICE = ["div", "data-testid", "item-price"]
-COL_ITEM_HTML_DESCRIPTION = ["div", "itemprop", "description"]
-COL_ITEM_FIRST_IMG = "img[data-testid^='item-photo']"
-COL_ITEM_CAROUSEL_IMGS = "img[data-testid='image-carousel-image-shown'], img[data-testid='image-carousel-image']"
-
-CHK_PROFILE_ITEMS = "div[data-testid='grid-item']"
-CHK_PROFILE_TITLE = "a.new-item-box__overlay--clickable"
-CHK_PROFILE_IMG = "img.web_ui__Image__content"
-
-UPL_ITEM_TITLE = (By.ID, "title")
-UPL_ITEM_DESCRIPTION = (By.ID, "description")
-UPL_ITEM_PRICE = (By.ID, "price")
-UPL_ITEM_CATEGORY = (By.ID, "category")
-UPL_ITEM_CATEGORY_FIRST = (By.CSS_SELECTOR, "[id^='catalog-suggestion-']")
-UPL_ITEM_CATEGORY_OPEN = (By.CSS_SELECTOR, "div.input-dropdown[data-testid='catalog-select-dropdown-content']")
-UPL_ITEM_IMG_INPUT = (By.CSS_SELECTOR, 'input[type="file"]')
-UPL_ITEM_IMG_PREVIEW = (By.CSS_SELECTOR, "div[data-testid^='image-wrapper-']")
-UPLOAD_SEQUENCE = [
-    "images",
-    "category",
-    "title",
-    "description",
-    "price"
-]
+CONFIG = {
+    # URLs
+    "home_url": "https://www.vinted.es/",
+    "profile_url": "https://www.vinted.es/member/",
+    "upload_url": "https://www.vinted.es/items/new",
+    "login_selector": "button#user-menu-button",
+    
+    # Collection selectors
+    "col_title": "h1",
+    "col_price": ["div", "data-testid", "item-price"],
+    "col_price_filter": None,
+    "col_description": ["div", "itemprop", "description"],
+    "col_first_img": (By.CSS_SELECTOR, "img[data-testid^='item-photo']"),
+    "col_carousel_imgs": (By.CSS_SELECTOR, "img[data-testid='image-carousel-image-shown'], img[data-testid='image-carousel-image']"),
+    "col_image_css": (By.CSS_SELECTOR, "img"),
+    "col_image_filter": None,
+    "col_image_pre_hook": None,
+    
+    # Check selectors
+    "chk_items": (By.CSS_SELECTOR, "div[data-testid='grid-item']"),
+    "chk_title": (By.CSS_SELECTOR, "a.new-item-box__overlay--clickable"),
+    "chk_image": (By.CSS_SELECTOR, "img.web_ui__Image__content"),
+    
+    # Upload selectors
+    "upl_title": (By.ID, "title"),
+    "upl_description": (By.ID, "description"),
+    "upl_price": (By.ID, "price"),
+    "upl_category": (By.ID, "category"),
+    "upl_category_first": (By.CSS_SELECTOR, "[id^='catalog-suggestion-']"),
+    "upl_category_open": (By.CSS_SELECTOR, "div.input-dropdown[data-testid='catalog-select-dropdown-content']"),
+    "upl_image_input": (By.CSS_SELECTOR, 'input[type="file"]'),
+    "upl_image_preview": (By.CSS_SELECTOR, "div[data-testid^='image-wrapper-']"),
+    "upl_continue_btn": None,
+    "upl_sequence": ["images", "title", "description", "price", "category"],
+}
 
 
 # ---------------------------
 # Collector
 # ---------------------------
 def collect_from_vinted(url: str) -> dict:
-    col_selectors = {
-        "col_title": COL_ITEM_HTML_TITLE,
-        "col_price": COL_ITEM_HTML_PRICE,
-        "col_price_filter": None,
-        "col_description": COL_ITEM_HTML_DESCRIPTION,
-        "col_img_extractor": vinted_collect_img_extractor,
-    }
-    return collect_listing_generic(
-        url=url,
-        marketplace=MARKETPLACE,
-        col_selectors=col_selectors
-    )
+    """Collect listing from Vinted."""
+    return collect_listing_generic(url, MARKETPLACE, CONFIG)
 
-def vinted_collect_img_extractor(driver):
+def col_image_pre_hook(driver):
+    """Click first image to open Vinted carousel."""
     try:
-        first_img = driver.find_element(By.CSS_SELECTOR, COL_ITEM_FIRST_IMG)
+        first_img = driver.find_element(*CONFIG["col_first_img"])
         driver.execute_script("arguments[0].click();", first_img)
         time.sleep(0.5)
     except Exception:
         pass
-    
-    images = []
-    elems = driver.find_elements(By.CSS_SELECTOR, COL_ITEM_CAROUSEL_IMGS)
-    seen = set()
-    for i in range(len(elems)):
-        try:
-            img = elems[i]
-            src = img.get_attribute("src")
-            if src and src not in seen:
-                images.append(src)
-                seen.add(src)
-        except StaleElementReferenceException as e:
-            print(f"⚠️ Error retrieving {MARKETPLACE.capitalize()} listing's images: {e}")
-            continue
-                
 
-    return images
+CONFIG["col_image_pre_hook"] = col_image_pre_hook
+
+def col_image_extractor(driver):
+    """Extract images from Vinted listing page."""
+    return extract_images_generic(
+        driver=driver,
+        css_selector=CONFIG["col_carousel_imgs"],
+        filter_func=CONFIG["col_image_filter"],
+        pre_extract_hook=CONFIG["col_image_pre_hook"],
+        marketplace=MARKETPLACE
+    )
 
 # ---------------------------
 # Checker
 # ---------------------------
 def check_on_vinted(listing) -> str | None:
-    chk_selectors = {
-        "home_url": HOME_URL,
-        "login_selector": LOGIN_SELECTOR,
-        "profile_url_resolver": vinted_profile_resolver,
-        "chk_items": CHK_PROFILE_ITEMS,
-        "chk_title": CHK_PROFILE_TITLE,
-        "chk_img": CHK_PROFILE_IMG,
-        "chk_title_extractor": vinted_check_title_extractor,
-        "chk_href_extractor": vinted_check_href_extractor,
-        "chk_image_extractor": vinted_check_image_extractor,
-    }
-    return check_listing_existence(
-        listing=listing,
-        marketplace=MARKETPLACE,
-        chk_selectors=chk_selectors
-    )
+    """Check if listing exists on Vinted."""
+    return check_listing_existence(listing, MARKETPLACE, CONFIG)
 
-def vinted_profile_resolver(driver):
-    # Extract user_id from page source
+def profile_url_resolver(driver):
+    """Extract user_id from page source and build profile URL."""
     html = driver.page_source
     m = re.search(r'"userId":"?(\d+)"?', html) or re.search(r'consentId=(\d+)', html)
     if m:
         user_id = m.group(1)
         print(f"🟢 Found {MARKETPLACE.capitalize()} user ID: {user_id}")
-        return f"{PROFILE_URL}{user_id}"
+        return f"{CONFIG['profile_url']}{user_id}"
     else:
         print(f"❌ Could not extract {MARKETPLACE.capitalize()} user ID.")
         return None
 
-def vinted_check_title_extractor(item, chk_title):
+def chk_title_extractor(item):
     """Extracts and shortens the title string for Vinted items."""
     try:
-        elem = item.find_element(By.CSS_SELECTOR, chk_title)
+        elem = item.find_element(*CONFIG["chk_title"])
         raw_title = elem.get_attribute("title").strip()
         return vinted_title_shorten(raw_title)
     except:
         return None
 
-def vinted_check_href_extractor(item, chk_title):
-    return item.find_element(By.CSS_SELECTOR, chk_title).get_attribute("href")
+def chk_href_extractor(item):
+    """Extract href from Vinted item."""
+    return item.find_element(*CONFIG["chk_title"]).get_attribute("href")
 
-def vinted_check_image_extractor(item, chk_img):
+def chk_image_extractor(item):
     """Extracts the main image URL for Vinted items."""
     try:
-        img_elem = item.find_element(By.CSS_SELECTOR, chk_img)
+        img_elem = item.find_element(*CONFIG["chk_image"])
         return img_elem.get_attribute("src").split("?")[0]
     except:
         return None
@@ -150,51 +129,38 @@ def vinted_check_image_extractor(item, chk_img):
 # Uploader
 # ---------------------------
 def upload_to_vinted(listing: dict):
+    """Upload listing to Vinted."""
     print(f"🌍 Opening {MARKETPLACE.capitalize()} upload page...")
     driver = visible_driver()
-    ensure_logged_in(driver, LOGIN_SELECTOR, HOME_URL, MARKETPLACE)
-    driver.get(UPLOAD_URL)
+    ensure_logged_in(driver, CONFIG["login_selector"], CONFIG["home_url"], MARKETPLACE)
+    driver.get(CONFIG["upload_url"])
 
-    upl_selectors = {
-        "upl_title": UPL_ITEM_TITLE,
-        "upl_description": UPL_ITEM_DESCRIPTION,
-        "upl_desc_resolver": None,
-        "upl_price": UPL_ITEM_PRICE,
-        "upl_category": UPL_ITEM_CATEGORY,
-        "upl_category_first": UPL_ITEM_CATEGORY_FIRST,
-        "upl_category_resolver": vinted_upload_category_resolver,
-        "upl_image_input": UPL_ITEM_IMG_INPUT,
-        "upl_image_preview": UPL_ITEM_IMG_PREVIEW,
-        "upl_continue_btn": None,
-    }
+    return upload_listing_generic(driver, listing, MARKETPLACE, CONFIG)
 
-    upload_listing_generic(
-        driver=driver, 
-        listing=listing,
-        marketplace=MARKETPLACE, 
-        upl_selectors=upl_selectors,
-        upl_sequence=UPLOAD_SEQUENCE, 
-    )
-
-    return driver
-
-
-def vinted_upload_category_resolver(driver, category_dropdown):
+def upl_category_resolver(driver, category_dropdown):
     try:
-        driver.find_element(*UPL_ITEM_CATEGORY_OPEN)
+        driver.find_element(*CONFIG["upl_category_open"])
         return True
     except:
         return False
 
 
 
-
+# Add extractors to config
+CONFIG["col_image_extractor"] = col_image_extractor
+CONFIG["profile_url_resolver"] = profile_url_resolver
+CONFIG["chk_title_extractor"] = chk_title_extractor
+CONFIG["chk_href_extractor"] = chk_href_extractor
+CONFIG["chk_image_extractor"] = chk_image_extractor
+CONFIG["upl_desc_resolver"] = None
+CONFIG["upl_category_resolver"] = upl_category_resolver
 
 # ---------------------------
 # Register this marketplace
 # ---------------------------
 register_marketplace(
     MARKETPLACE,
+    config=CONFIG,
     collector=collect_from_vinted,
     checker=check_on_vinted,
     uploader=upload_to_vinted

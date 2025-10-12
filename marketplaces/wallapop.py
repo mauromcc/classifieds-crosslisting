@@ -4,7 +4,8 @@ from selenium.webdriver.common.by import By
 from selenium.common.exceptions import StaleElementReferenceException
 
 from constants import register_marketplace
-from helpers.scraping import collect_listing_generic, check_listing_existence, find_listing_in_profile
+from helpers.scraping import collect_listing_generic, check_listing_existence
+from helpers.images import extract_images_generic
 from helpers.uploader import upload_listing_generic
 from helpers.drivers import headless_driver, visible_driver
 from helpers.cookies import ensure_logged_in
@@ -14,118 +15,90 @@ from helpers.abort import check_abort
 MARKETPLACE = "wallapop"
 
 # ---------------------------
-# URLs & Selectors
+# Wallapop-specific configuration
 # ---------------------------
-HOME_URL = "https://es.wallapop.com"
-PROFILE_URL = "https://es.wallapop.com/app/catalog/published"
-UPLOAD_URL = "https://es.wallapop.com/app/catalog/upload/consumer-goods"
-LOGIN_SELECTOR = "img[data-testid='user-avatar']"
-
-COL_ITEM_HTML_TITLE = "h1"
-COL_ITEM_HTML_PRICE = ["span", "class", "Price"]
-COL_ITEM_PRICE_FILTER = lambda x: x and COL_ITEM_HTML_PRICE[2] in x
-COL_ITEM_HTML_DESCRIPTION = ["meta", "name", "og:description"]
-
-CHK_PROFILE_ITEMS = "tsl-catalog-item a.item-details"
-CHK_PROFILE_TITLE = ".info-title"
-CHK_PROFILE_IMG = ["./ancestor::div[contains(@class, 'row')]", "div.ItemAvatar"]
-
-UPL_ITEM_TITLE = (By.ID, "summary")
-UPL_ITEM_DESCRIPTION = (By.ID, "description")
-UPL_ITEM_PRICE = (By.ID, "sale_price")
-UPL_ITEM_CONTINUE_BTN = (By.CSS_SELECTOR, "walla-button[data-testid='continue-button']")
-UPL_ITEM_CATEGORY = (By.CSS_SELECTOR, 'div.walla-dropdown__inner-input[aria-label="Categoría y subcategoría"]')
-UPL_ITEM_CATEGORY_FIRST = (By.CSS_SELECTOR, 'div.sc-walla-dropdown-item')
-UPL_ITEM_IMG_INPUT = (By.CSS_SELECTOR, 'input[type="file"]')
-UPL_ITEM_IMG_PREVIEW = (By.CSS_SELECTOR, "img[src^='data:']")
-UPLOAD_SEQUENCE = [
-    "title",
-    "continue_btn",
-    "images",
-    "continue_btn",
-    "category",
-    "description",
-    "price"
-]
-
-
-
+CONFIG = {
+    # URLs
+    "home_url": "https://es.wallapop.com",
+    "profile_url": "https://es.wallapop.com/app/catalog/published",
+    "upload_url": "https://es.wallapop.com/app/catalog/upload/consumer-goods",
+    "login_selector": "img[data-testid='user-avatar']",
+    
+    # Collection selectors
+    "col_title": "h1",
+    "col_price": ["span", "class", "Price"],
+    "col_price_filter": lambda x: x and "Price" in x,
+    "col_description": ["meta", "name", "og:description"],
+    "col_first_img": None,
+    "col_carousel_imgs": None,
+    "col_image_css": (By.CSS_SELECTOR, "img"),
+    "col_image_filter": lambda src: src and "cdn.wallapop.com" in src and "W640" in src,
+    "col_image_pre_hook": None, 
+    
+    # Check selectors
+    "chk_items": (By.CSS_SELECTOR, "tsl-catalog-item a.item-details"),
+    "chk_title": (By.CSS_SELECTOR, ".info-title"),
+    "chk_image": [(By.XPATH, "./ancestor::div[contains(@class, 'row')]"), (By.CSS_SELECTOR, "div.ItemAvatar")],
+    
+    # Upload selectors
+    "upl_title": (By.ID, "summary"),
+    "upl_description": (By.ID, "description"),
+    "upl_price": (By.ID, "sale_price"),
+    "upl_category": (By.CSS_SELECTOR, 'div.walla-dropdown__inner-input[aria-label="Categoría y subcategoría"]'),
+    "upl_category_first": (By.CSS_SELECTOR, 'div.sc-walla-dropdown-item'),
+    "upl_category_open": None,
+    "upl_image_input": (By.CSS_SELECTOR, 'input[type="file"]'),
+    "upl_image_preview": (By.CSS_SELECTOR, "img[src^='data:']"),
+    "upl_continue_btn": (By.CSS_SELECTOR, "walla-button[data-testid='continue-button']"),
+    "upl_sequence": ["title", "continue_btn", "images", "continue_btn", "category", "description", "price"],
+}
 
 
 # ---------------------------
 # Collector
 # ---------------------------
 def collect_from_wallapop(url: str) -> dict:
-    col_selectors = {
-        "col_title": COL_ITEM_HTML_TITLE,
-        "col_price": COL_ITEM_HTML_PRICE,
-        "col_price_filter": COL_ITEM_PRICE_FILTER,
-        "col_description": COL_ITEM_HTML_DESCRIPTION,
-        "col_img_extractor": wallapop_collect_img_extractor,
-    }
-    return collect_listing_generic(
-        url=url,
-        marketplace=MARKETPLACE,
-        col_selectors=col_selectors
+    """Collect listing from Wallapop."""
+    return collect_listing_generic(url, MARKETPLACE, CONFIG)
+
+def col_image_extractor(driver):
+    """Extract images from Wallapop listing page."""
+    return extract_images_generic(
+        driver=driver,
+        css_selector=CONFIG["col_image_css"],
+        filter_func=CONFIG["col_image_filter"],
+        pre_extract_hook=CONFIG["col_image_pre_hook"],
+        marketplace=MARKETPLACE
     )
-
-def wallapop_collect_img_extractor(driver):
-    images = []
-    elems = driver.find_elements(By.CSS_SELECTOR, "img")
-    seen = set()
-    for i in range(len(elems)):
-        try:
-            img = elems[i]
-            src = img.get_attribute("src")
-            if src and src not in seen and "cdn.wallapop.com" in src and "W640" in src:
-                images.append(src)
-                seen.add(src)
-        except StaleElementReferenceException as e:
-            print(f"⚠️ Error retrieving {MARKETPLACE.capitalize()} listing's images: {e}")
-            continue
-
-    return images
 
 
 # ---------------------------
 # Checker
 # ---------------------------
 def check_on_wallapop(listing) -> str | None:
-    chk_selectors = {
-        "home_url": HOME_URL,
-        "login_selector": LOGIN_SELECTOR,
-        "profile_url_resolver": wallapop_profile_resolver,
-        "chk_items": CHK_PROFILE_ITEMS,
-        "chk_title": CHK_PROFILE_TITLE,
-        "chk_img": CHK_PROFILE_IMG,
-        "chk_title_extractor": wallapop_check_title_extractor,
-        "chk_href_extractor": wallapop_check_href_extractor,
-        "chk_image_extractor": wallapop_check_img_extractor,
-    }
-    return check_listing_existence(
-        listing=listing,
-        marketplace=MARKETPLACE,
-        chk_selectors=chk_selectors
-    )
+    """Check if listing exists on Wallapop."""
+    return check_listing_existence(listing, MARKETPLACE, CONFIG)
 
-def wallapop_profile_resolver(driver):
-    return PROFILE_URL
+def profile_url_resolver(driver):
+    """Wallapop uses a fixed profile URL."""
+    return CONFIG["profile_url"]
 
-def wallapop_check_title_extractor(item, chk_title):
+def chk_title_extractor(item):
     """Extracts the title string for Wallapop items."""
     try:
-        return item.find_element(By.CSS_SELECTOR, chk_title).text.strip()
+        return item.find_element(*CONFIG["chk_title"]).text.strip()
     except:
         return None
 
-def wallapop_check_href_extractor(item, chk_title=None):
+def chk_href_extractor(item):
+    """Extract href from Wallapop item."""
     return item.get_attribute("href")
 
-def wallapop_check_img_extractor(item, chk_img):
+def chk_image_extractor(item):
     """Extracts the main image URL for Wallapop items."""
     try:
-        parent = item.find_element(By.XPATH, chk_img[0])
-        avatar_divs = parent.find_elements(By.CSS_SELECTOR, chk_img[1])
+        parent = item.find_element(*CONFIG["chk_image"][0])
+        avatar_divs = parent.find_elements(*CONFIG["chk_image"][1])
         for avatar in avatar_divs:
             style = avatar.get_attribute("style")
             if "url(" in style:
@@ -141,35 +114,16 @@ def wallapop_check_img_extractor(item, chk_img):
 # Uploader
 # ---------------------------
 def upload_to_wallapop(listing: dict):
+    """Upload listing to Wallapop."""
     print(f"🌍 Opening {MARKETPLACE.capitalize()} upload page...")
     driver = visible_driver()
-    ensure_logged_in(driver, LOGIN_SELECTOR, HOME_URL, MARKETPLACE)
-    driver.get(UPLOAD_URL)
+    ensure_logged_in(driver, CONFIG["login_selector"], CONFIG["home_url"], MARKETPLACE)
+    driver.get(CONFIG["upload_url"])
+    
+    return upload_listing_generic(driver, listing, MARKETPLACE, CONFIG)
 
-    upl_selectors = {
-        "upl_title": UPL_ITEM_TITLE,
-        "upl_description": UPL_ITEM_DESCRIPTION,
-        "upl_desc_resolver": wallapop_upload_desc_resolver,
-        "upl_price": UPL_ITEM_PRICE,
-        "upl_category": UPL_ITEM_CATEGORY,
-        "upl_category_first": UPL_ITEM_CATEGORY_FIRST,
-        "upl_category_resolver": wallapop_upload_category_resolver,
-        "upl_image_input": UPL_ITEM_IMG_INPUT,
-        "upl_image_preview": UPL_ITEM_IMG_PREVIEW,
-        "upl_continue_btn": UPL_ITEM_CONTINUE_BTN
-    }
-
-    upload_listing_generic(
-        driver=driver, 
-        listing=listing,
-        marketplace=MARKETPLACE, 
-        upl_selectors=upl_selectors,
-        upl_sequence=UPLOAD_SEQUENCE, 
-    )
-
-    return driver
-
-def wallapop_upload_desc_resolver(driver, desc_input, scraped_desc):
+def upl_desc_resolver(driver, desc_input, scraped_desc):
+    """Handle Wallapop AI description (keep or replace)."""
     current_ai = desc_input.get_attribute("value").strip()
 
     print(f"\n📝 {MARKETPLACE.capitalize()} AI-generated description:\n---\n" + current_ai + "\n---")
@@ -183,24 +137,35 @@ def wallapop_upload_desc_resolver(driver, desc_input, scraped_desc):
             arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
         """, desc_input, scraped_desc)
         print("✅ Scraped description used")
+        return False
     else:
         print("✅ Kept AI description")
         return True
 
-    return False
-
-def wallapop_upload_category_resolver(driver, category_dropdown):
+def upl_category_resolver(driver, category_dropdown):
+    """Check if Wallapop category dropdown is open."""
     try:
         return category_dropdown.get_attribute("aria-expanded") == "true"
     except Exception:
         return False
-    
+
+
+
+# Add extractors to config
+CONFIG["col_image_extractor"] = col_image_extractor
+CONFIG["profile_url_resolver"] = profile_url_resolver
+CONFIG["chk_title_extractor"] = chk_title_extractor
+CONFIG["chk_href_extractor"] = chk_href_extractor
+CONFIG["chk_image_extractor"] = chk_image_extractor
+CONFIG["upl_desc_resolver"] = upl_desc_resolver
+CONFIG["upl_category_resolver"] = upl_category_resolver
 
 # ---------------------------
 # Register this marketplace
 # ---------------------------
 register_marketplace(
     MARKETPLACE,
+    config=CONFIG,
     collector=collect_from_wallapop,
     checker=check_on_wallapop,
     uploader=upload_to_wallapop
