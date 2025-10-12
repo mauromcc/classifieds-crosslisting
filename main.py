@@ -37,9 +37,9 @@ def main():
             if check_abort(): 
                 continue
 
-            # Step 1.5: Check if it already exists in other marketplaces
-            listing["exists_in"] = {}
-            check_existing_in_other_marketplaces(listing)
+            # # Step 1.5: Check if it already exists in other marketplaces
+            # listing["exists_in"] = {}
+            # check_existing_in_other_marketplaces(listing)
 
             if check_abort(): 
                 continue
