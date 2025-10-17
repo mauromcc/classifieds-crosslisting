@@ -6,8 +6,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import StaleElementReferenceException
 
 from constants import HEADERS
-from helpers.drivers import headless_driver
-from helpers.cookies import ensure_logged_in
+from helpers.drivers import undetected_driver, headless_driver, visible_driver
+from helpers.cookies import ensure_logged_in, try_accept_cookies
 from helpers.abort import check_abort
 from helpers.images import safe_download_image, download_image, compute_image_hashes, hamming_distance_hex
 from helpers.utils import is_match, scroll_to_load_all_items
@@ -19,7 +19,7 @@ from helpers.utils import is_match, scroll_to_load_all_items
 
 def collect_listing_generic(url: str, marketplace: str, config: dict) -> dict | None:
     """
-    Generic collector that handles both listing details AND images in one call.
+    Generic collector that handles listing details and images.
     Uses config dict that contains all selectors and extractor functions.
     Returns complete listing dict, or None if aborted.
     """
@@ -34,45 +34,59 @@ def collect_listing_generic(url: str, marketplace: str, config: dict) -> dict | 
     "phash": None,
     }
 
-    # Get text details first
-    result = collect_listing_details(url, marketplace, config)
-    if result is None:  # aborted
-        return None
 
-    title, price, description = result
-    if title is None or price is None or description is None:
-        print(f"❌ Failed to collect required details from {marketplace.capitalize()}'s listing.")
-        return listing  # incomplete but not aborted
+    driver = None
+    try:
+        # ---------- DETAILS ----------
+        if config.get("use_driver_for_details"):
+            driver = undetected_driver()
+            result = collect_listing_details_driver(driver, url, marketplace, config)
+        else:
+            result = collect_listing_details_http(url, marketplace, config)
 
-    listing["title"] = title
-    listing["price"] = price
-    listing["description"] = description
-    
-    if check_abort():
-        return None
-    
-    # Get images
-    result = collect_listing_images(url, marketplace, config)
-    if result is None:  # aborted
-        return None
+        if result is None: # aborted
+            return None
 
-    images, md5, phash = result
-    if not images:
-        print(f"❌ Failed to collect images from {marketplace.capitalize()}'s listing.")
-        return listing  # incomplete but not aborted 
-    
-    listing["images"] = images
-    listing["md5"] = md5
-    listing["phash"] = phash
-    
-    return listing
+        title, price, description = result
+        if title is None or price is None or description is None:
+            print(f"❌ Failed to collect required details from {marketplace.capitalize()}'s listing.")
+            return listing  # incomplete but not aborted
 
-def collect_listing_details(url: str, marketplace: str, config: dict) -> tuple[str, str, str] | None:
+        listing["title"] = title
+        listing["price"] = price
+        listing["description"] = description
+
+        # ---------- IMAGES ----------
+        if check_abort():
+            return None
+
+        result = collect_listing_images(url, marketplace, config, driver=driver)
+        if result is None:
+            return None
+
+        images, md5, phash = result
+        if not images:
+            print(f"❌ Failed to collect images from {marketplace.capitalize()}'s listing.")
+            return listing  # incomplete but not aborted
+
+        listing["images"] = images
+        listing["md5"] = md5
+        listing["phash"] = phash
+
+        return listing
+
+    finally:
+        if driver and config.get("use_driver_for_details"):
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+def collect_listing_details_http(url: str, marketplace: str, config: dict) -> tuple[str, str, str] | None:
     """
     Scrape title, price, and description from a URL using BeautifulSoup.
     Returns (title, price, description) tuple, or None if aborted/failed.
     """
-
     if check_abort():
         return None
 
@@ -84,9 +98,8 @@ def collect_listing_details(url: str, marketplace: str, config: dict) -> tuple[s
         soup = BeautifulSoup(r.text, "html.parser")
 
         # Title
-        title_tag = soup.find(config["col_title"]) if isinstance(config["col_title"], str) else soup.find(*config["col_title"])
-        title = title_tag.get_text(strip=True) if title_tag else None
-
+        title_tag = soup.find(config["col_title"][0], {config["col_title"][1]: config["col_title"][2]}) if isinstance(config["col_title"], list) else None
+        title = ''.join(title_tag.find_all(string=True, recursive=False)).strip() if title_tag else None
         # Price
         if isinstance(config["col_price"], list):
             tag_name, attr_name, attr_val = config["col_price"]
@@ -118,25 +131,83 @@ def collect_listing_details(url: str, marketplace: str, config: dict) -> tuple[s
         print(f"⚠️ Error scraping listing details: {e}")
         return None
 
-def collect_listing_images(url: str, marketplace: str, config: dict) -> tuple[list, str, str] | None:
+def collect_listing_details_driver(driver, url: str, marketplace: str, config: dict) -> tuple[str, str, str] | None:
+    """Scrape details from JS-rendered pages using undetected_chromedriver."""
+    if check_abort(driver):
+        return None
+
+    print(f"🌍 Opening {marketplace.capitalize()} listing...")
+    try:
+        driver.get(url)
+
+        try_accept_cookies(driver)
+        WebDriverWait(driver, 10).until(lambda d: (el := d.find_element(*config["col_title"])).text.strip() and "¡Ups!" not in el.text)
+
+        # Title
+        title_element = driver.find_element(By.CSS_SELECTOR, config["col_title"]) if isinstance(config["col_title"], str) else driver.find_element(*config["col_title"])
+        title = driver.execute_script("return Array.from(arguments[0].childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();", title_element)
+
+        # Price
+        if isinstance(config["col_price"], list):
+            tag_name, attr_name, attr_val = config["col_price"]
+            if config.get("col_price_filter"):
+                price_el = driver.find_element(getattr(By, attr_name.upper().replace('-', '_')), config["col_price_filter"])
+            else:
+                price_el = driver.find_element(getattr(By, attr_name.upper().replace('-', '_')), attr_val)
+            price = price_el.text.strip() if price_el else None
+        else:
+            price = driver.find_element(*config["col_price"]).text.strip()
+
+        # Description
+        if isinstance(config["col_description"], list):
+            tag_name, attr_name, attr_val = config["col_description"]
+            desc_el = driver.find_element(getattr(By, attr_name.upper().replace('-', '_')), attr_val)
+            description = desc_el.get_attribute("content") or desc_el.text.strip() if desc_el else None
+        else:
+            desc_el = driver.find_element(*config["col_description"])
+            description = desc_el.get_attribute("content") or desc_el.text.strip()
+
+        print(f'\n---\nTitle: {title}\nPrice: {price}\nDescription: {description}\n---')
+        return title, price, description
+
+    except Exception as e:
+        print(f"⚠️ Error in collect_listing_details_driver ({marketplace}): {type(e).__name__}: {e}")
+        
+        # Debug: Save screenshot and page source
+        if driver._is_headless:
+            try:
+                driver.save_screenshot("error_screenshot.png")
+                with open("error_page_source.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                print("💾 Saved error_screenshot.png and error_page_source.html for debugging")
+            except:
+                pass
+        
+        return None
+
+def collect_listing_images(url: str, marketplace: str, config: dict, driver=None) -> tuple[list, str, str] | None:
     """
-    Open page in headless driver and collect images.
+    Collect listing images (can reuse existing driver session).
     Returns (images_local, md5, phash) tuple, or None if aborted/failed.
     """
     if check_abort():
         return None
 
-    images = []
-    driver = None
+    local_driver = False
+    if driver is None:
+        print(f"🌍 Opening {marketplace.capitalize()} listing to collect images...")
+        local_driver = True
+        driver = undetected_driver() if marketplace == "milanuncios" else headless_driver()
 
-    print(f"🌍 Opening {marketplace.capitalize()} listing...")
+    images = []
+
     try:
-        driver = headless_driver()
         if check_abort():
             return None
         print("⏳ Retrieving images...")
-        driver.get(url)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["col_image_css"]))
+        if local_driver:
+            driver.get(url)
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located(config["col_image_css"]))
 
         if check_abort():
             return None

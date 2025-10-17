@@ -10,6 +10,65 @@ from helpers.drivers import visible_driver, headless_driver, is_headless
 
 
 
+def try_accept_cookies(driver, timeout: float = 3):
+    """
+    Attempt to find and click common cookie consent buttons.
+    Tries multiple strategies simultaneously for maximum compatibility.
+    """
+    try:
+        # Wait briefly for any cookie popup to appear
+        time.sleep(1)
+        
+        # Strategy 1: Try known IDs first (fastest)
+        for button_id in ["didomi-notice-agree-button", "onetrust-accept-btn-handler", "accept-cookies", "acceptCookies"]:
+            try:
+                button = driver.find_element(By.ID, button_id)
+                if button.is_displayed() and button.is_enabled():
+                    button.click()
+                    print(f"✅ Cookie consent accepted (ID: {button_id})")
+                    time.sleep(0.5)
+                    return True
+            except Exception:
+                continue
+        
+        # Strategy 2: Try common class patterns
+        for css in [".didomi-button-highlight", "button[class*='cookie'][class*='accept']", ".accept-cookies"]:
+            try:
+                button = driver.find_element(By.CSS_SELECTOR, css)
+                if button.is_displayed() and button.is_enabled():
+                    button.click()
+                    print(f"✅ Cookie consent accepted (CSS: {css})")
+                    time.sleep(0.5)
+                    return True
+            except Exception:
+                continue
+        
+        # Strategy 3: Text-based matching (finds buttons with "accept" or "aceptar")
+        try:
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            for button in buttons:
+                text = button.text.lower()
+                if any(keyword in text for keyword in ["aceptar", "accept", "agree", "cerrar"]):
+                    if button.is_displayed() and button.is_enabled():
+                        try:
+                            button.click()
+                            print(f"✅ Cookie consent accepted (text: {button.text[:30]})")
+                            time.sleep(0.5)
+                            return True
+                        except Exception:
+                            driver.execute_script("arguments[0].click();", button)
+                            print(f"✅ Cookie consent accepted via JS (text: {button.text[:30]})")
+                            time.sleep(0.5)
+                            return True
+        except Exception:
+            pass
+        
+    except Exception as e:
+        # No cookie popup found or error - continue silently
+        pass
+    
+    return False
+
 def cookie_path(marketplace: str) -> str:
     """Return the path where cookies for a given marketplace are stored."""
     cookies_dir = os.path.join(SCRIPT_DIR, "cookies")
@@ -98,7 +157,7 @@ def apply_cookies(driver, cookies: list, homepage_url: str, marketplace: str):
 def is_logged_in(driver, login_check_selector: str) -> bool:
     """Check if logged in by looking for an element that only exists when logged in."""
     try:
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, login_check_selector)))
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located(login_check_selector))
         return True
     except:
         return False

@@ -22,16 +22,18 @@ CONFIG = {
     "home_url": "https://es.wallapop.com",
     "profile_url": "https://es.wallapop.com/app/catalog/published",
     "upload_url": "https://es.wallapop.com/app/catalog/upload/consumer-goods",
-    "login_selector": "img[data-testid='user-avatar']",
+    
+    "login_selector": (By.CSS_SELECTOR,"img[data-testid='user-avatar']"),
     
     # Collection selectors
-    "col_title": "h1",
+    "use_driver_for_details": False,
+    "col_title": ["h1", "class", "item-detail_ItemDetailTwoColumns__title__VtWrR"],
     "col_price": ["span", "class", "Price"],
     "col_price_filter": lambda x: x and "Price" in x,
     "col_description": ["meta", "name", "og:description"],
     "col_first_img": None,
     "col_carousel_imgs": None,
-    "col_image_css": (By.CSS_SELECTOR, "img"),
+    "col_image_css": (By.CSS_SELECTOR, "img[slot='carousel-content']"),
     "col_image_filter": lambda src: src and "cdn.wallapop.com" in src and "W640" in src,
     "col_image_pre_hook": None, 
     

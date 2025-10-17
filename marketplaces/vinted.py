@@ -24,10 +24,12 @@ CONFIG = {
     "home_url": "https://www.vinted.es/",
     "profile_url": "https://www.vinted.es/member/",
     "upload_url": "https://www.vinted.es/items/new",
-    "login_selector": "button#user-menu-button",
+    
+    "login_selector": (By.CSS_SELECTOR,"button#user-menu-button"),
     
     # Collection selectors
-    "col_title": "h1",
+    "use_driver_for_details": False,
+    "col_title": ["h1", "class", "web_ui__Text__title"],
     "col_price": ["div", "data-testid", "item-price"],
     "col_price_filter": None,
     "col_description": ["div", "itemprop", "description"],
@@ -71,8 +73,6 @@ def col_image_pre_hook(driver):
         time.sleep(0.5)
     except Exception:
         pass
-
-CONFIG["col_image_pre_hook"] = col_image_pre_hook
 
 def col_image_extractor(driver):
     """Extract images from Vinted listing page."""
@@ -147,6 +147,7 @@ def upl_category_resolver(driver, category_dropdown):
 
 
 # Add extractors to config
+CONFIG["col_image_pre_hook"] = col_image_pre_hook
 CONFIG["col_image_extractor"] = col_image_extractor
 CONFIG["profile_url_resolver"] = profile_url_resolver
 CONFIG["chk_title_extractor"] = chk_title_extractor

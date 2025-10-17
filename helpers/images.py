@@ -82,9 +82,24 @@ def download_image(url, folder="temp_images"):
     folder_path = os.path.join(SCRIPT_DIR, folder)
     os.makedirs(folder_path, exist_ok=True)
     url_hash = hashlib.md5(url.encode()).hexdigest()
-    ext = url.split(".")[-1].split("?")[0]
+    
+    # Extract extension more safely - handle URLs without file extensions
+    # Split by / to get last segment, then split by . to get extension
+    url_path = url.split("?")[0]  # Remove query params first
+    last_segment = url_path.split("/")[-1]
+    
+    # Check if last segment has an extension
+    if "." in last_segment:
+        ext = last_segment.split(".")[-1]
+        # Validate extension (only allow common image extensions)
+        if ext.lower() not in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']:
+            ext = "jpg"  # Default fallback
+    else:
+        ext = "jpg"  # Default for URLs without extensions
+    
     filename = f"{url_hash}.{ext}"
     path = os.path.join(folder_path, filename)
+    
     if not os.path.exists(path):
         response = requests.get(url, headers=HEADERS)
         response.raise_for_status()

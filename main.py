@@ -1,7 +1,6 @@
 import time, threading, traceback
 
-import marketplaces.vinted
-import marketplaces.wallapop
+from marketplaces import wallapop, vinted, milanuncios
 
 from helpers.images import remove_temp_folder
 from helpers.abort import listen_for_abort, reset_abort, check_abort

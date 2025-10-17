@@ -1,6 +1,8 @@
 import time, re
 
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import StaleElementReferenceException
 
 from constants import register_marketplace
@@ -22,13 +24,15 @@ CONFIG = {
     "home_url": "https://www.milanuncios.com",
     "profile_url": "https://www.milanuncios.com/mis-anuncios",
     "upload_url": "https://www.milanuncios.com/publicar-anuncios-gratis/",
-    "login_selector": (By.CSS_SELECTOR, "p.ma-AdProfileMyAds-dataContainer-name"),
+    
+    "login_selector": (By.CSS_SELECTOR, "span.ma-UserAvatar"),
     
     # Collection selectors
-    "col_title": "h1",
-    "col_price": ["span", "class", "ma-AdPrice-value"],
+    "use_driver_for_details": True,
+    "col_title": (By.CSS_SELECTOR, "h1"),
+    "col_price": (By.CSS_SELECTOR, "span.ma-AdPrice-value"),
     "col_price_filter": None,
-    "col_description": ["p", "class", "ma-AdDetail-description"],
+    "col_description": (By.CSS_SELECTOR, "div.sui-MoleculeCollapsible-content, p.ma-AdDetail-description"),
     "col_first_img": None,
     "col_carousel_imgs": None,
     "col_image_css": (By.CSS_SELECTOR, "img[data-testid='SHARED_SLIDER_IMAGES']"),
@@ -41,7 +45,7 @@ CONFIG = {
     "chk_image": [(By.XPATH, "./ancestor::div[contains(@class, 'row')]"), (By.CSS_SELECTOR, "div.ItemAvatar")],
     
     # Upload selectors
-    "upl_title": (By.ID, "summary"),
+    "upl_title": (By.ID, "category-finder"),
     "upl_description": (By.ID, "description"),
     "upl_price": (By.ID, "sale_price"),
     "upl_category": (By.CSS_SELECTOR, 'div.walla-dropdown__inner-input[aria-label="Categoría y subcategoría"]'),
@@ -60,6 +64,32 @@ CONFIG = {
 def collect_from_milanuncios(url: str) -> dict:
     """Collect listing from Milanuncios."""
     return collect_listing_generic(url, MARKETPLACE, CONFIG)
+
+def col_image_pre_hook(driver):
+    """Click through Milanuncios carousel to load all images."""    
+    try:
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img[data-testid='SHARED_SLIDER_IMAGES']")))
+        time.sleep(1)
+        
+        # Try to get total images
+        try:
+            counter_el = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, "p.ma-SharedSliderCounter")))
+            counter_text = counter_el.text.strip()
+            total_images = int(counter_text.split("/")[-1].strip()) if "/" in counter_text else 1
+        except Exception:
+            total_images = 1  # fallback if no counter visible
+        
+        next_button = driver.find_element(By.CSS_SELECTOR, "button[data-testid='SHARED-SLIDER-ARROW-RIGHT']")
+        
+        for i in range(total_images - 1):  # -1 because first image is already loaded
+            try:
+                next_button.click()
+                time.sleep(0.5)  # Wait for image to load
+            except:
+                break
+                
+    except Exception as e:
+        print(f"⚠️ Could not navigate carousel: {e}")
 
 def col_image_extractor(driver):
     """Extract images from Milanuncios listing page."""
@@ -152,6 +182,7 @@ def upl_category_resolver(driver, category_dropdown):
 
 
 # Add extractors to config
+CONFIG["col_image_pre_hook"] = col_image_pre_hook
 CONFIG["col_image_extractor"] = col_image_extractor
 CONFIG["profile_url_resolver"] = profile_url_resolver
 CONFIG["chk_title_extractor"] = chk_title_extractor
